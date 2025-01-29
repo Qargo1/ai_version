@@ -1,14 +1,4 @@
 '''
-Шумоподавление: Можно использовать библиотеки для шумоподавления, такие как 
-noisereduce 7.
-Логирование: Добавить систему логирования для отслеживания ошибок и событий.
-Оптимизация производительности: Использовать многопоточность и оптимизацию 
-кода для повышения производительности.
-Интеграция с другими сервисами: Например, использование облачных сервисов 
-для распознавания речи (Google Speech-to-Text, Amazon Transcribe).
-'''
-
-'''
 Основные предложения:
 Шумоподавление :
 Вы уже предусмотрели параметр noise_reduction в конфигурации, но не реализовали его 
@@ -48,22 +38,21 @@ import torchvision  # Если потребуется работа с визуа
 import noisereduce as nr  # Библиотека для шумоподавления
 import logging  # Логирование
 
+from silero import silero_stt, silero_tts, silero_te
+import zipfile
+from glob import glob
+
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-language = 'ru'
-model_id = 'v4_ru'
-sample_rate = 48000
-speaker = 'xenia'
-device = torch.device('cpu')
-
 @dataclass
 class VoiceConfig:
-    speaker: str = 'xenia'
-    sample_rate: int = 24000
-    language: str = 'ru'
+    speaker: str = 'kseniya'
+    model_id: str = 'v4_ru'
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    sample_rate: int = 48000
+    language: str = 'ru'
     put_accent: bool = True
     put_yo: bool = True
     volume: float = 0.9
@@ -72,6 +61,20 @@ class VoiceConfig:
     sound_format: str = "wav"
     default_volume: float = 0.9
     noise_reduction: bool = True  # Новый параметр для шумоподавления
+
+# Конфигурация по умолчанию
+DEFAULT_VOICE_CONFIG = VoiceConfig(
+    speaker='kseniya',
+    model_id='v4_ru',
+    sample_rate=48000,
+    device = 'cuda' if torch.cuda.is_available() else 'cpu',
+    language='ru',
+    volume=0.9,
+    speech_rate=160,
+    soundbank_dir="sounds",
+    sound_format="wav",
+    noise_reduction=True  # Включаем шумоподавление
+)
 
 class SpeechSynthesizer:
     def __init__(self, config: VoiceConfig):
@@ -85,13 +88,13 @@ class SpeechSynthesizer:
     def _init_tts(self):
         """Инициализация модели TTS"""
         try:
-            self.model, self.text = torch.hub.load(
+            self.model, example_text = torch.hub.load(
                 repo_or_dir='snakers4/silero-models',
                 model='silero_tts',
                 language=self.config.language,
-                speaker=self.config.speaker
+                speaker=self.config.model_id
             )
-            self.model.to(self.config.device)
+            self.model.to(torch.device(self.config.device))
         except Exception as e:
             logging.error(f"Error loading TTS model: {str(e)}")
             raise
@@ -141,14 +144,14 @@ class SpeechSynthesizer:
             logging.warning(f"Sound {sound_name} not found!")
 
     def synthesize(self, text: str) -> None:
-        """Синтез речи в фоновом режиме"""
+        """Синтез речи"""
         try:
             audio = self.model.apply_tts(
                 text=text,
                 speaker=self.config.speaker,
-                sample_rate=self.config.sample_rate,
-                put_accent=self.config.put_accent,
-                put_yo=self.config.put_yo
+                sample_rate=self.config.sample_rate
+                #put_accent=self.config.put_accent,
+                #put_yo=self.config.put_yo
             )
             self.audio_queue.put(audio.numpy())
         except Exception as e:
@@ -175,6 +178,7 @@ class SpeechRecognizer:
         self.recognizer = sr.Recognizer()
         self.mic = sr.Microphone()
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self.listening_paused = False
         self._init_recognition(model_size)
         self._adjust_noise()
 
@@ -186,35 +190,40 @@ class SpeechRecognizer:
         """Калибровка фонового шума"""
         with self.mic as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            
+    def pause_listening(self):
+        """Приостановка прослушивания"""
+        self.listening_paused = True
+        
+    def resume_listening(self):
+        """Возобновление прослушивания"""
+        self.listening_paused = False
 
-    def continuous_listen(self, callback) -> None:
-        """Непрерывное прослушивание в фоне"""
+    def continuous_listen(self, callback):
         def listen_loop():
-            try:
-                with self.mic as source:
-                    while True:
-                        try:
-                            audio = self.recognizer.listen(source, timeout=3)
-                            if self.config.noise_reduction:
-                                # Применение шумоподавления
-                                audio_data = np.frombuffer(audio.frame_data, dtype=np.int16)
-                                reduced_noise = nr.reduce_noise(y=audio_data, sr=self.config.sample_rate)
-                                audio.frame_data = reduced_noise.astype(np.int16).tobytes()
-
-                            text = self.recognizer.recognize_google(audio, language=self.config.language)
+            with self.mic as source:
+                while True:
+                    if self.listening_paused:
+                        continue  
+                    try:                     
+                        audio = self.recognizer.listen(source, timeout=3)
+                        if self.config.noise_reduction:
+                            audio_data = np.frombuffer(audio.frame_data, dtype=np.int16)
+                            reduced_noise = nr.reduce_noise(y=audio_data, sr=self.config.sample_rate, prop_decrease=0.8, stationary=False)
+                            audio.frame_data = reduced_noise.astype(np.int16).tobytes()
+                        text = self.recognizer.recognize_google(audio, language=self.config.language)
+                        if text and text != self.last_text:  # Проверка на повторения
+                            self.last_text = text
                             callback(text)
-                        except sr.WaitTimeoutError:
-                            continue
-                        except sr.UnknownValueError:
-                            logging.warning("Speech recognition could not understand audio")
-                        except sr.RequestError as e:
-                            logging.error(f"Could not request results from speech recognition service; {e}")
-                        except Exception as e:
-                            logging.error(f"ASR Error: {str(e)}")
-            except Exception as e:
-                logging.error(f"Microphone error: {str(e)}")
+                    except sr.WaitTimeoutError:
+                        continue
+                    except sr.UnknownValueError:
+                        logging.warning("Не удалось распознать речь")
+                    except Exception as e:
+                        logging.error(f"Ошибка ASR: {str(e)}")
 
         self.executor.submit(listen_loop)
+
 
     def shutdown(self):
         """Завершение работы распознавателя"""
@@ -250,20 +259,12 @@ class AudioManager:
         if sound_key in self.synthesizer.soundbank:
             self.synthesizer.play_sound(sound_key)
         else:
-            self.synthesizer.synthesize(text)
+            self.recognizer.pause_listening()  # Отключаем микрофон
+            try:
+                self.synthesizer.synthesize(text)
+            finally:
+                self.recognizer.resume_listening()  # Включаем микрофон
 
-
-# Конфигурация по умолчанию
-DEFAULT_VOICE_CONFIG = VoiceConfig(
-    speaker='v4_ru',
-    sample_rate=24000,
-    language='ru',
-    volume=0.9,
-    speech_rate=160,
-    soundbank_dir="my_sounds",
-    sound_format="ogg",
-    noise_reduction=True  # Включаем шумоподавление
-)
 
 if __name__ == "__main__":
     # Инициализация AudioManager с конфигурацией по умолчанию

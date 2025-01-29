@@ -14,4 +14,4 @@ venv.bak/
 info/software/
 
 # Игнорировать папку models/llm
-models/llm/
+models/
