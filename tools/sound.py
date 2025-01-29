@@ -38,20 +38,38 @@ import torchvision  # Если потребуется работа с визуа
 import noisereduce as nr  # Библиотека для шумоподавления
 import logging  # Логирование
 
-from silero import silero_stt, silero_tts, silero_te
+from silero import silero_stt
 import zipfile
 from glob import glob
+import asyncio
+from vosk import Model, KaldiRecognizer
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+import signal
+import keyboard
+import json
+#import deepspeech
+from whisper import load_model as load_whisper
+#from coqui_stt import Model as CoquiModel
 
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logging.info(f"Using device: {device}")
+print(f'\n{sr.Microphone.list_microphone_names()}\n')
 
 @dataclass
 class VoiceConfig:
     speaker: str = 'kseniya'
     model_id: str = 'v4_ru'
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    sample_rate: int = 48000
+    sample_rate: int = 16000
     language: str = 'ru'
     put_accent: bool = True
     put_yo: bool = True
@@ -61,20 +79,20 @@ class VoiceConfig:
     sound_format: str = "wav"
     default_volume: float = 0.9
     noise_reduction: bool = True  # Новый параметр для шумоподавления
+    energy_threshold: int = 400
+    use_silero: bool = False  # Включаем Silero
+    use_vosk: bool = False  # Включаем Vosk
+    use_deepspeech: bool = False
+    use_whisper: bool = True
+    use_coqui: bool = False
+    vosk_model_path: str = "models/sound/vosk-model-ru-0.42" #качаем отдельно с https://alphacephei.com/vosk/models
 
 # Конфигурация по умолчанию
-DEFAULT_VOICE_CONFIG = VoiceConfig(
-    speaker='kseniya',
-    model_id='v4_ru',
-    sample_rate=48000,
-    device = 'cuda' if torch.cuda.is_available() else 'cpu',
-    language='ru',
-    volume=0.9,
-    speech_rate=160,
-    soundbank_dir="sounds",
-    sound_format="wav",
-    noise_reduction=True  # Включаем шумоподавление
-)
+DEFAULT_VOICE_CONFIG = VoiceConfig()
+
+def handle_exception(logger, message, exception):
+    logger.error(f"{message}: {str(exception)}")
+    raise
 
 class SpeechSynthesizer:
     def __init__(self, config: VoiceConfig):
@@ -84,20 +102,38 @@ class SpeechSynthesizer:
         self.soundbank = self._load_soundbank(config.soundbank_dir, config.sound_format)
         self._init_tts()
         self._init_playback()
+        logging.info("Initializing SpeechSynthesizer...")
 
     def _init_tts(self):
-        """Инициализация модели TTS"""
+        """Инициализация TTS"""
         try:
-            self.model, example_text = torch.hub.load(
+            self.model, _ = torch.hub.load(
                 repo_or_dir='snakers4/silero-models',
                 model='silero_tts',
                 language=self.config.language,
                 speaker=self.config.model_id
             )
             self.model.to(torch.device(self.config.device))
+
+            try:
+                example_text = "Привет, мир!"
+                traced_model = torch.jit.trace(self.model.apply_tts, example_text)
+                self.model = traced_model
+                logging.info("TTS модель успешно скомпилирована с JIT (trace).")
+            except Exception as e:
+                logging.error(f"Ошибка при компиляции модели с JIT: {str(e)}")
+                self.model, _ = torch.hub.load(
+                    repo_or_dir='snakers4/silero-models',
+                    model='silero_tts',
+                    language=self.config.language,
+                    speaker=self.config.model_id
+                    )
+                self.model.to(torch.device(self.config.device))
+
         except Exception as e:
-            logging.error(f"Error loading TTS model: {str(e)}")
+            logging.error(f"Ошибка загрузки TTS модели: {str(e)}")
             raise
+
 
     def _init_playback(self):
         """Инициализация аудиовоспроизведения"""
@@ -124,16 +160,64 @@ class SpeechSynthesizer:
         """Загрузка пользовательских звуков из папки"""
         soundbank = {}
         if os.path.exists(sound_dir):
+            logging.info(f"Loading sounds from directory: {sound_dir}")
             for file in os.listdir(sound_dir):
                 if file.endswith(f".{fmt}"):
                     key = os.path.splitext(file)[0].lower()
                     try:
                         with wave.open(os.path.join(sound_dir, file), 'rb') as wav:
+                            # Проверяем параметры файла
+                            sample_width = wav.getsampwidth()
+                            channels = wav.getnchannels()
+                            sample_rate = wav.getframerate()
+                            logging.debug(f"File: {file}, Channels: {channels}, Sample Rate: {sample_rate}, Width: {sample_width}")
+
+                            if channels != 1 or sample_rate != self.config.sample_rate:
+                                logging.warning(f"Skipping {file}: unsupported format.")
+                                continue
+
                             audio_data = np.frombuffer(wav.readframes(-1), dtype=np.int16)
                             soundbank[key] = audio_data.astype(np.float32) / 32768.0
+                            logging.info(f"Loaded sound: {key}")
                     except Exception as e:
                         logging.error(f"Error loading {file}: {str(e)}")
+        else:
+            logging.warning(f"Sound directory not found: {sound_dir}")
         return soundbank
+    
+    def test_synthesize(self, text: str):
+        """Test TTS without adding to the queue."""
+        try:
+            with torch.no_grad():
+                audio = self.model.apply_tts(
+                    text=text,
+                    speaker=self.config.speaker,
+                    sample_rate=self.config.sample_rate
+                )
+                logging.debug(f"Speaker: {self.config.speaker}, Sample Rate: {self.config.sample_rate}")
+            return audio.numpy()
+        except Exception as e:
+            handle_exception(logging, "TTS Test Error", e)
+            
+    def test_speech_to_text(self, audio_file: str):
+        """Тестирует распознавание речи из файла"""
+        try:
+            with sr.AudioFile(audio_file) as source:
+                audio = self.recognizer.record(source)
+                text = self.recognizer.recognize_vosk(audio)
+            logging.info(f"Recognized text: {text}")
+            return text
+        except Exception as e:
+            handle_exception(logging, "STT Test Error", e)
+    
+    def close(self):
+        """Explicitly release resources."""
+        self.playback_active = False
+        if hasattr(self, 'stream'):
+            self.stream.stop_stream()
+            self.stream.close()
+        if hasattr(self, 'p'):
+            self.p.terminate()
 
     def play_sound(self, sound_name: str) -> None:
         """Воспроизведение пользовательского звука"""
@@ -144,102 +228,171 @@ class SpeechSynthesizer:
             logging.warning(f"Sound {sound_name} not found!")
 
     def synthesize(self, text: str) -> None:
-        """Синтез речи"""
         try:
-            audio = self.model.apply_tts(
-                text=text,
-                speaker=self.config.speaker,
-                sample_rate=self.config.sample_rate
-                #put_accent=self.config.put_accent,
-                #put_yo=self.config.put_yo
-            )
+            with torch.no_grad():
+                audio = self.model.apply_tts(
+                    text=text,
+                    speaker=self.config.speaker,
+                    sample_rate=self.config.sample_rate
+                )
+            logging.info(f"Synthesized audio for text: '{text}'")
             self.audio_queue.put(audio.numpy())
         except Exception as e:
-            logging.error(f"TTS Error: {str(e)}")
+            handle_exception(logging, "TTS Error", e)
 
     def _playback_worker(self):
         """Рабочий поток для воспроизведения"""
         while self.playback_active:
             try:
                 audio = self.audio_queue.get(timeout=0.5)
+                logging.info(f"Audio retrieved from queue. Length: {len(audio)}")
                 if isinstance(audio, np.ndarray):
                     self.stream.write(audio.tobytes())
                 else:
                     logging.error("Invalid audio format!")
             except queue.Empty:
+                logging.debug("Queue is empty. Waiting for audio...")
                 continue
             except Exception as e:
                 logging.error(f"Playback error: {str(e)}")
 
 
 class SpeechRecognizer:
-    def __init__(self, config: VoiceConfig, model_size: str = 'tiny'):
+    def __init__(self, config: VoiceConfig):
         self.config = config
         self.recognizer = sr.Recognizer()
         self.mic = sr.Microphone()
-        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.executor = ThreadPoolExecutor(max_workers=1)
         self.listening_paused = False
-        self._init_recognition(model_size)
-        self._adjust_noise()
+        self.model = None
+        self._init_recognition()
+        logging.info("Initializing SpeechRecognizer...")
 
-    def _init_recognition(self, model_size: str):
-        """Инициализация модели распознавания"""
-        self.model = sr.Recognizer()
-
-    def _adjust_noise(self):
-        """Калибровка фонового шума"""
-        with self.mic as source:
-            self.recognizer.adjust_for_ambient_noise(source, duration=1)
-            
-    def pause_listening(self):
-        """Приостановка прослушивания"""
-        self.listening_paused = True
+    def _init_recognition(self):
+        if self.config.use_whisper:
+            logging.info("Используется Whisper")
+            self.model = load_whisper("medium")
+        elif self.config.use_silero and self.config.device == 'cuda':
+            logging.info("Используется Silero STT на GPU")
+            self.model, self.decoder, self.utils = torch.hub.load(
+                repo_or_dir='snakers4/silero-models',
+                model='silero_stt',
+                language='en', 
+                device=torch.device(self.config.device))
+            (self.read_batch, self.split_into_batches,
+            self.read_audio, self.prepare_model_input) = self.utils  # see function signature for details
+        elif self.config.use_vosk:
+            logging.info("Используется Vosk STT")
+            self.model = Model(self.config.vosk_model_path)
+            self.recognizer_vosk = KaldiRecognizer(self.model, self.config.sample_rate)
+        elif self.config.use_deepspeech:
+            logging.info("Используется DeepSpeech")
+            self.model = deepspeech.Model(self.config.deepspeech_model_path)
+        elif self.config.use_coqui:
+            logging.info("Используется Coqui STT")
+            self.model = CoquiModel(self.config.coqui_model_path)
         
-    def resume_listening(self):
-        """Возобновление прослушивания"""
-        self.listening_paused = False
+    def __del__(self):
+        if hasattr(self, 'stream') and self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        if hasattr(self, 'pyaudio_instance'):
+            self.pyaudio_instance.terminate()
+            
+    def close(self):
+        """Explicitly release resources."""
+        if hasattr(self, 'mic') and self.mic:
+            self.mic.__exit__(None, None, None)
+        if hasattr(self, 'executor'):
+            self.executor.shutdown(wait=False)
+    
+    def test_recognition(self, audio_file: str):
+        """Test STT with a pre-recorded audio file."""
+        try:
+            with sr.AudioFile(audio_file) as source:
+                audio = self.recognizer.record(source)
+                text = self.recognizer.recognize_vosk(audio)
+            return text
+        except Exception as e:
+            handle_exception(logging, "STT Test Error", e)
+            
+    def _process_audio(self, audio):
+        if self.config.use_vosk:
+            return self.recognizer_vosk.AcceptWaveform(audio.get_wav_data()) 
+        elif self.config.use_whisper:
+            return self.model.transcribe(audio.get_wav_data())['text'].strip()
+
+    async def listen_loop(self, callback):
+        with self.mic as source:
+            while True:
+                try:
+                    logging.info("Жду аудио...")
+                    self.recognizer.adjust_for_ambient_noise(source)  # we only need to calibrate once, before we start listening
+                    audio = self.recognizer.listen(source)#, timeout=5, phrase_time_limit=100)
+
+                    if self.config.use_whisper:
+                        try:
+                            text = self.recognizer.recognize_whisper(audio, language="russian")
+                            logging.info(f"Текст передан{text}")
+                        except sr.UnknownValueError:
+                            print("Whisper could not understand audio")
+                        except sr.RequestError as e:
+                            print(f"Could not request results from Whisper; {e}")
+                    elif self.config.use_vosk:
+                        if self.recognizer_vosk.AcceptWaveform(audio.get_wav_data()):
+                            result = json.loads(self.recognizer_vosk.Result())
+                            text = result.get("text", "").strip()
+                        else:
+                            text = None
+                    elif self.config.use_silero:
+                        batches = self.split_into_batches(audio.get_wav_data(), batch_size=10)
+                        input = self.prepare_model_input(self.read_batch(batches[0]),
+                            device=device)
+                        text = self.model(input)
+                    elif self.config.use_deepspeech:
+                        text = self.model.stt(audio.get_wav_data())
+                    elif self.config.use_coqui:
+                        text = self.model.stt(audio.get_wav_data())
+                    else:
+                        text = self._process_audio(audio)
+                    
+                    if text:
+                        callback(text)
+                except KeyboardInterrupt:
+                    logging.info("Listening interrupted by user. Exiting gracefully...")
+                    break
+                except Exception as e:
+                    handle_exception(logging, "ASR Error", e)
 
     def continuous_listen(self, callback):
-        def listen_loop():
-            with self.mic as source:
-                while True:
-                    if self.listening_paused:
-                        continue  
-                    try:                     
-                        audio = self.recognizer.listen(source, timeout=3)
-                        if self.config.noise_reduction:
-                            audio_data = np.frombuffer(audio.frame_data, dtype=np.int16)
-                            reduced_noise = nr.reduce_noise(y=audio_data, sr=self.config.sample_rate, prop_decrease=0.8, stationary=False)
-                            audio.frame_data = reduced_noise.astype(np.int16).tobytes()
-                        text = self.recognizer.recognize_google(audio, language=self.config.language)
-                        if text and text != self.last_text:  # Проверка на повторения
-                            self.last_text = text
-                            callback(text)
-                    except sr.WaitTimeoutError:
-                        continue
-                    except sr.UnknownValueError:
-                        logging.warning("Не удалось распознать речь")
-                    except Exception as e:
-                        logging.error(f"Ошибка ASR: {str(e)}")
-
-        self.executor.submit(listen_loop)
-
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.create_task(self.listen_loop(callback))
+        if not loop.is_running():
+            loop.run_until_complete(asyncio.sleep(0))
 
     def shutdown(self):
-        """Завершение работы распознавателя"""
         self.executor.shutdown(wait=False)
 
 
 class AudioManager:
     def __init__(self, config: VoiceConfig):
-        self.synthesizer = SpeechSynthesizer(config)
-        self.recognizer = SpeechRecognizer(config)
-        self.command_queue = queue.Queue()
-        self.config = config
-        self._init_handlers()
+        try:
+            self.synthesizer = SpeechSynthesizer(config)
+            self.recognizer = SpeechRecognizer(config)
+            self.command_queue = queue.SimpleQueue()
+            self.config = config
+            self._init_handlers()
+        except Exception as e:
+            logging.error(f"Ошибка инициализации AudioManager: {str(e)}")
+            raise
 
     def _init_handlers(self):
         """Инициализация обработчиков аудиособытий"""
+        #В качестве callback-функции передается _process_voice_command
         self.recognizer.continuous_listen(self._process_voice_command)
 
     def _process_voice_command(self, text: str):
@@ -252,8 +405,21 @@ class AudioManager:
             return self.command_queue.get_nowait()
         except queue.Empty:
             return None
+    
+    def play_sound_on_key_press(self, key: str, sound_name: str):
+        """Воспроизводит звук при нажатии клавиши"""
+        def on_key_event(event):
+            if event.name == key and event.event_type == "down":
+                self.synthesizer.play_sound(sound_name)
+        keyboard.hook(on_key_event)
+        
+    def shutdown(self):
+        """Завершение работы AudioManager"""
+        self.recognizer.shutdown()
+        self.synthesizer.__del__()  # Очистка ресурсов синтезатора
 
     def speak(self, text: str) -> None:
+        self.play_sound_on_key_press('space', 'beep') #new
         """Приоритет пользовательских звуков"""
         sound_key = text.strip().lower()
         if sound_key in self.synthesizer.soundbank:
@@ -274,10 +440,7 @@ if __name__ == "__main__":
 
     try:
         while True:
-            # Получение команды из голосового ввода
-            command = audio_manager.get_command()
-
-            if command:
+            if command := audio_manager.get_command():
                 print(f"Вы сказали: {command}")
 
                 # Если пользователь сказал "стоп", завершаем программу
@@ -293,4 +456,5 @@ if __name__ == "__main__":
         print("\nПрограмма завершена пользователем.")
     finally:
         # Очистка ресурсов
-        audio_manager.recognizer.shutdown()
+        logging.info("Shutting down AudioManager...")
+        audio_manager.shutdown()

@@ -26,3 +26,8 @@ torchaudio
 librosa
 torchvision
 noisereduce
+vosk
+keyboard
+TTS
+deepspeech
+coqui-stt-model-manager
