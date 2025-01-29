@@ -69,7 +69,7 @@ class VoiceConfig:
     speaker: str = 'kseniya'
     model_id: str = 'v4_ru'
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    sample_rate: int = 16000
+    sample_rate: int = 8000 #16000
     language: str = 'ru'
     put_accent: bool = True
     put_yo: bool = True
@@ -239,7 +239,7 @@ class SpeechSynthesizer:
             self.audio_queue.put(audio.numpy())
         except Exception as e:
             handle_exception(logging, "TTS Error", e)
-
+            
     def _playback_worker(self):
         """Рабочий поток для воспроизведения"""
         while self.playback_active:
@@ -373,6 +373,37 @@ class SpeechRecognizer:
         loop.create_task(self.listen_loop(callback))
         if not loop.is_running():
             loop.run_until_complete(asyncio.sleep(0))
+            
+    def listen_once(self):
+        """Однократное прослушивание микрофона"""
+        with self.mic as source:
+            try:
+                logging.info("Жду аудио...")
+                self.recognizer.adjust_for_ambient_noise(source)
+                audio = self.recognizer.listen(source, phrase_time_limit=4)# ,timeout=10)
+                
+                # Распознавание текста
+                if self.config.use_whisper:
+                    text = self.recognizer.recognize_whisper(audio, language="russian")
+                elif self.config.use_vosk:
+                    if self.recognizer_vosk.AcceptWaveform(audio.get_wav_data()):
+                        result = json.loads(self.recognizer_vosk.Result())
+                        text = result.get("text", "").strip()
+                    else:
+                        text = None
+                else:
+                    text = self._process_audio(audio)
+                
+                return text.strip().lower() if text else None
+            except sr.UnknownValueError:
+                logging.warning("Could not understand audio.")
+                return None
+            except sr.RequestError as e:
+                logging.error(f"Could not request results; {e}")
+                return None
+            except Exception as e:
+                handle_exception(logging, "ASR Error", e)
+                return None
 
     def shutdown(self):
         self.executor.shutdown(wait=False)
@@ -389,6 +420,15 @@ class AudioManager:
         except Exception as e:
             logging.error(f"Ошибка инициализации AudioManager: {str(e)}")
             raise
+        
+    def _init_handlers(self):
+        """Инициализация обработчиков аудиособытий"""
+        #В качестве callback-функции передается _process_voice_command
+        self.recognizer.continuous_listen(self._process_voice_command)
+        
+    def _process_voice_command(self, text: str):
+        """Обработка распознанной команды"""
+        self.command_queue.put(text.strip().lower())
     
     def start_listening(self):
         """Запуск прослушивания микрофона"""
@@ -397,14 +437,12 @@ class AudioManager:
             self.is_listening = True
             logging.info("Microphone listening started.")
             
-    def _init_handlers(self):
-        """Инициализация обработчиков аудиособытий"""
-        #В качестве callback-функции передается _process_voice_command
-        self.recognizer.continuous_listen(self._process_voice_command)
-
-    def _process_voice_command(self, text: str):
-        """Обработка распознанной команды"""
-        self.command_queue.put(text.strip().lower())
+    def process_command(self, text: str):
+        """Обработка команды: генерация и воспроизведение ответа"""
+        if text in self.synthesizer.soundbank:
+            self.synthesizer.play_sound(text)
+        else:
+            self.synthesizer.synthesize(text)
 
     def get_command(self) -> Optional[str]:
         """Получение последней команды"""
@@ -413,13 +451,6 @@ class AudioManager:
         except queue.Empty:
             logging.info("There are no commands in the queue. Waiting for new commands...")
             return None
-    
-    def play_sound_on_key_press(self, key: str, sound_name: str):
-        """Воспроизводит звук при нажатии клавиши"""
-        def on_key_event(event):
-            if event.name == key and event.event_type == "down":
-                self.synthesizer.play_sound(sound_name)
-        keyboard.hook(on_key_event)
         
     def shutdown(self):
         """Завершение работы AudioManager"""
@@ -438,31 +469,41 @@ class AudioManager:
                 self.synthesizer.synthesize(text)
             finally:
                 self.recognizer.resume_listening()  # Включаем микрофон
+                
+    async def run(self):
+        """Основной цикл программы"""
+        while True:
+            print("Говорите что-нибудь! Для выхода скажите 'стоп'.")
+            
+            # Шаг 1: Прослушивание микрофона
+            command = self.recognizer.listen_once()
+            if not command:
+                logging.info("No command recognized. Listening again...")
+                continue
+            
+            print(f"Вы сказали: {command}")
+            
+            # Шаг 2: Проверка на завершение
+            if command.lower() in ["стоп", "stop"]:
+                print("Завершение работы...")
+                break
+            
+            # Шаг 3: Генерация и воспроизведение ответа
+            response = f"Вы сказали: {command}"
+            self.process_command(response)
+            
+            # Ждем завершения воспроизведения
+            while not self.synthesizer.audio_queue.empty():
+                await asyncio.sleep(0.1)  # Ждем, пока очередь аудио не опустеет
 
 
 if __name__ == "__main__":
-    
     # Инициализация AudioManager с конфигурацией по умолчанию
     audio_manager = AudioManager(DEFAULT_VOICE_CONFIG)
 
     try:
-        print("Нажмите Enter, чтобы начать говорить...")
-        input()  # Ждем, пока пользователь нажмет Enter
-        audio_manager.start_listening()  # Явно запускаем прослушивание
-        while True:
-            print("Говорите что-нибудь! Для выхода скажите 'стоп'.")
-            if command := audio_manager.get_command():
-                print(f"Вы сказали: {command}")
-
-                # Если пользователь сказал "стоп", завершаем программу
-                if command.lower() in ["стоп", "stop"]:
-                    print("Завершение работы...")
-                    break
-
-                # Воспроизведение ответа
-                response = f"Вы сказали: {command}"
-                audio_manager.speak(response)
-
+        # Запуск асинхронного цикла через asyncio.run()
+        asyncio.run(audio_manager.run())
     except KeyboardInterrupt:
         print("\nПрограмма завершена пользователем.")
     finally:
