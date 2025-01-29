@@ -326,14 +326,14 @@ class SpeechRecognizer:
         with self.mic as source:
             while True:
                 try:
-                    logging.info("Жду аудио...")
+                    #logging.info("Жду аудио...")
                     self.recognizer.adjust_for_ambient_noise(source)  # we only need to calibrate once, before we start listening
                     audio = self.recognizer.listen(source)#, timeout=5, phrase_time_limit=100)
 
                     if self.config.use_whisper:
                         try:
                             text = self.recognizer.recognize_whisper(audio, language="russian")
-                            logging.info(f"Текст передан{text}")
+                            #logging.info(f"Текст передан{text}")
                         except sr.UnknownValueError:
                             print("Whisper could not understand audio")
                         except sr.RequestError as e:
@@ -385,11 +385,18 @@ class AudioManager:
             self.recognizer = SpeechRecognizer(config)
             self.command_queue = queue.SimpleQueue()
             self.config = config
-            self._init_handlers()
+            self.is_listening = False  # Флаг для контроля состояния прослушивания
         except Exception as e:
             logging.error(f"Ошибка инициализации AudioManager: {str(e)}")
             raise
-
+    
+    def start_listening(self):
+        """Запуск прослушивания микрофона"""
+        if not self.is_listening:
+            self._init_handlers()
+            self.is_listening = True
+            logging.info("Microphone listening started.")
+            
     def _init_handlers(self):
         """Инициализация обработчиков аудиособытий"""
         #В качестве callback-функции передается _process_voice_command
@@ -404,6 +411,7 @@ class AudioManager:
         try:
             return self.command_queue.get_nowait()
         except queue.Empty:
+            logging.info("There are no commands in the queue. Waiting for new commands...")
             return None
     
     def play_sound_on_key_press(self, key: str, sound_name: str):
@@ -433,13 +441,16 @@ class AudioManager:
 
 
 if __name__ == "__main__":
+    
     # Инициализация AudioManager с конфигурацией по умолчанию
     audio_manager = AudioManager(DEFAULT_VOICE_CONFIG)
 
-    print("Говорите что-нибудь! Для выхода скажите 'стоп'.")
-
     try:
+        print("Нажмите Enter, чтобы начать говорить...")
+        input()  # Ждем, пока пользователь нажмет Enter
+        audio_manager.start_listening()  # Явно запускаем прослушивание
         while True:
+            print("Говорите что-нибудь! Для выхода скажите 'стоп'.")
             if command := audio_manager.get_command():
                 print(f"Вы сказали: {command}")
 
