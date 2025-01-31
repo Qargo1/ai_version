@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Chat-bot</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="styles.css?v=1.0.1">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.webgpu.js",
+                "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.webgpu.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+                "@pixiv/three-vrm": "../lib/three-vrm.module.js",
+                "@pixiv/three-vrm/nodes": "../lib/nodes/index.module.js"
+            }
+        }
+    </script>
+    <script type="module" src="http://127.0.0.1:5500/static/main.js?v=1.0.1"></script>
+</head>
+<body>
+    <div class="control-button">
+        <button id="playPauseButton">Play</button>
+    </div>
+    <div class="model-info">
+        <p id="modelInfo1">Current Model: None</p>
+    </div>
+    <div class="model-info">
+        <p id="modelInfo2">Current Model: None</p>
+    </div>
+</body>
+</html>

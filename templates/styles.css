@@ -1,0 +1,13 @@
+.control-button {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+}
+.model-info {
+    position: absolute;
+    top: 50px;
+    left: 10px;
+    z-index: 10;
+    color: white;
+}
