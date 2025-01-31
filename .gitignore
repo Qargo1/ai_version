@@ -28,6 +28,7 @@ ffmpeg.exe
 ffprobe.exe
 
 trashcan/
-three_js_library/static/three.js/
 
 trashcan/
+
+static/three.js/
