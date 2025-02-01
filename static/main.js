@@ -5,38 +5,66 @@ import { VRMLoaderPlugin, MToonMaterialLoaderPlugin, VRMUtils } from '@pixiv/thr
 import { MToonNodeMaterial } from '@pixiv/three-vrm/nodes';
 
 
+const MODEL_PATH = 'http://127.0.0.1:5500/models/visual/vrm_models/AvatarB.vrm'
+
 class ModelViewer {
     constructor() {
+        this.clock = new THREE.Clock(); // Создаем таймер
         this.initScene();
         this.initControls();
         this.initAudio();
         this.setupEventListeners();
-        this.preloadModels();
+        this.preloadModel();
         this.isDragging = false;
         this.dragStartMouse = new THREE.Vector2();
         this.dragStartModelPosition = new THREE.Vector3();
         this.setupDragHandlers();
         this.draggedObject = null;
         this.setupMouseWheelZoom();
+
+        // Добавляем mixer для анимаций
+        this.mixer = null;
     }
 
-    initScene() {
-        // Сцена
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0xeeeeee);
+    async initScene() {
+        // Создаем WebGL-совместимый canvas
+        const canvas = document.createElement('canvas');
+        document.body.appendChild(canvas);
 
         // Камера
         this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.camera.position.set(0, 1.6, 3);
 
+        // Сцена
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0xeeeeee);
+
         // Рендерер
-        this.renderer = new THREE.WebGLRenderer({
+        this.renderer = new THREE.WebGPURenderer({
+            canvas: document.querySelector('canvas'),
             antialias: true,
-            powerPreference: "high-performance"
+            alpha: true,
         });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.shadowMap.enabled = true;
-        document.body.appendChild(this.renderer.domElement);
+
+        this.model = MODEL_PATH
+        console.log("Model init from: ", this.model);
+
+        try {
+            await this.renderer.init(); // Асинхронная инициализация
+            console.log("WebGPURenderer initialized successfully");
+
+            // Настройка размеров и пиксельного соотношения
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+
+            // Включение теней (если необходимо)
+            this.renderer.shadowMap.enabled = true;
+
+            // Запуск цикла рендеринга
+            this.animate();
+        } catch (error) {
+            console.error("Failed to initialize WebGPURenderer:", error);
+        }
 
         // Освещение
         this.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -50,11 +78,6 @@ class ModelViewer {
         this.clock = new THREE.Clock();
         this.mixer = null;
 
-        // Модели
-        this.models = [
-            'http://127.0.0.1:5500/models/visual/vrm_models/Ki.vrm'
-        ]
-
         this.preloadedAssets = new Map();
         this.currentModelIndex = 0;
         this.modelGroup = new THREE.Group();
@@ -65,29 +88,52 @@ class ModelViewer {
         this.scene.add(this.lod);
     }
 
-    async preloadModels() {
+    async preloadModel() {
+        console.log("Model at initialization");
+
+        if (!this.model) {
+            console.error("Model is None?");
+            return;
+        }
+
         try {
-            await Promise.all(this.models.map(async (url, index) => {
-                console.log(`Loading model from: ${url}`);
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`Failed to load model: ${url}`);
-                }
-                const arrayBuffer = await response.arrayBuffer();
+            console.log(`Loading model from: ${this.model}`);
+            const response = await fetch(this.model);
+            if (!response.ok) {
+                throw new Error(`Failed to load model: ${this.model}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            
+            // gltf and vrm
+            let currentVrm = undefined;
+            const loader = new GLTFLoader();
+            loader.crossOrigin = 'anonymous';
 
-                const loader = new THREE.GLTFLoader();
-                loader.register((parser) => new VRMLoaderPlugin(parser)); // Добавляем поддержку VRM
+            loader.register( ( parser ) => {
 
-                loader.parse(arrayBuffer, '', (gltf) => {
-                    this.preloadedAssets.set(url, gltf);
-                    console.log('VRM model loaded:', gltf.userData.vrm);
-                    if (index === 0) {
-                        this.loadModel(gltf); // Загружаем первую модель сразу после загрузки
-                    }
-                }, (error) => {
-                    console.error('Error parsing model:', error);
-                });
-            }));
+				// create a WebGPU compatible MToonMaterialLoaderPlugin
+				const mtoonMaterialPlugin = new MToonMaterialLoaderPlugin( parser, {
+
+					// set the material type to MToonNodeMaterial
+					materialType: MToonNodeMaterial,
+
+				} );
+
+				return new VRMLoaderPlugin( parser, {
+
+					mtoonMaterialPlugin,
+
+				} );
+
+			} );
+
+            loader.parse(arrayBuffer, '', (gltf) => {
+                this.preloadedAssets.set(this.model, gltf);
+                console.log('VRM model loaded:', gltf.userData.vrm);
+                this.loadModel(gltf); // Загружаем модель
+            }, (error) => {
+                console.error('Error parsing model:', error);
+            });
         } catch (error) {
             console.error('Preloading failed:', error);
         }
@@ -112,7 +158,7 @@ class ModelViewer {
                 // Настройка морфинга (например, улыбка)
                 const expressionManager = vrm.expressionManager;
                 if (expressionManager) {
-                    expressionManager.setValue('happy', 1.0); // Устанавливаем вес эмоции
+                    expressionManager.setValue('sad', 1.0); // Устанавливаем вес эмоции
                     expressionManager.update(); // Применяем изменения
                 }
 
@@ -121,6 +167,8 @@ class ModelViewer {
                     this.mixer = new THREE.AnimationMixer(vrm.scene);
                     this.mixer.clipAction(gltf.animations[0]).play();
                 }
+
+                this.updateFaceExpression(vrm, 'happy', 1.0);
             } else {
                 console.warn('Loaded model is not a VRM.');
             }
@@ -130,12 +178,17 @@ class ModelViewer {
     }
 
     initControls() {
+        if (!this.camera || !this.renderer) {
+            console.error("Camera or renderer is not initialized");
+            return;
+        }
+
         // Управление камерой
-        // this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 1;
-        this.controls.minDistance = 1;
-        this.controls.maxDistance = 10;
+        this.controls.minDistance = 0.1;
+        this.controls.maxDistance = 7;
     }
 
     setupDragHandlers() {
@@ -258,10 +311,15 @@ class ModelViewer {
             if (e.key === 'm') this.nextModel();
             if (e.key === ' ') this.toggleAnimation();
         });
+        document.addEventListener('click', () => {
+            if (THREE.AudioContext) {
+                THREE.AudioContext.getContext().resume();
+            }
+        }, { once: true });
     }
 
     nextModel() {
-        this.currentModelIndex = (this.currentModelIndex + 1) % this.models.length;
+        this.currentModelIndex = (this.currentModelIndex + 1) % this.model.length;
         this.loadModel();
         this.playSound(this.clickSound);
     }
@@ -272,14 +330,24 @@ class ModelViewer {
         }
     }
 
+    updateFaceExpression(vrm, expressionName, weight) {
+        const expressionManager = vrm.expressionManager;
+        if (expressionManager && expressionManager.setValue) {
+            expressionManager.setValue(expressionName, weight);
+            expressionManager.update();
+        }
+    }
+
     handleClick(event) {
         // Raycaster
         const mouse = new THREE.Vector2();
+
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
         const raycaster = new THREE.Raycaster();
+        
         raycaster.setFromCamera(mouse, this.camera);
-        updateFaceExpression(vrm, 'happy', 1.0);
 
         const intersects = raycaster.intersectObjects(this.modelGroup.children, true);
 
@@ -307,23 +375,17 @@ class ModelViewer {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    animate() {
+    async animate() {
+        if (!this.camera || !this.renderer || !this.scene) return;
+    
         requestAnimationFrame(() => this.animate());
+    
         const delta = this.clock.getDelta();
-
         if (this.mixer) this.mixer.update(delta);
-        this.controls.update();
-
-        this.renderer.render(this.scene, this.camera);
-    }
-
-    updateFaceExpression(vrm, expressionName, weight) {
-        const expressionManager = vrm.expressionManager;
-        if (expressionManager && expressionManager.setValue) {
-            expressionManager.setValue(expressionName, weight);
-            expressionManager.update();
-        }
-    }
+        if (this.controls) this.controls.update();
+    
+        await this.renderer.renderAsync(this.scene, this.camera);
+    }    
 }
 
 // Инициализация приложения
