@@ -17,6 +17,7 @@ info/software/
 models/
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 voicevox
 recording.wav
 *.tmp
@@ -33,6 +34,9 @@ trashcan/
 trashcan/
 
 static/three.js/
+=======
+trashcan/
+>>>>>>> Stashed changes
 =======
 trashcan/
 >>>>>>> Stashed changes
