@@ -32,5 +32,9 @@ ffprobe.exe
 
 trashcan/
 
+<<<<<<< Updated upstream
+static/three.js/
+>>>>>>> Stashed changes
+=======
 static/three.js/
 >>>>>>> Stashed changes
