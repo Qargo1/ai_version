@@ -14,4 +14,23 @@ venv.bak/
 info/software/
 
 # Игнорировать папку models/llm
+<<<<<<< Updated upstream
 models/
+=======
+models/
+
+voicevox
+recording.wav
+*.tmp
+test.wav
+.env
+
+node_modules/
+
+ffmpeg.exe
+ffprobe.exe
+
+trashcan/
+
+static/three.js/
+>>>>>>> Stashed changes
