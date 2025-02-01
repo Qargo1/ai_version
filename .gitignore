@@ -31,12 +31,9 @@ ffprobe.exe
 
 trashcan/
 
-trashcan/
-
 static/three.js/
-=======
-trashcan/
->>>>>>> Stashed changes
-=======
-trashcan/
->>>>>>> Stashed changes
+
+tools/xr_animator/
+tools/xr_animator
+
+

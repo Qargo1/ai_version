@@ -3,9 +3,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { VRMLoaderPlugin, MToonMaterialLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { MToonNodeMaterial } from '@pixiv/three-vrm/nodes';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js'
 
+const MODEL_PATH = 'http://127.0.0.1:5500/models/visual/vrm_models/Diamond.vrm'
 
-const MODEL_PATH = 'http://127.0.0.1:5500/models/visual/vrm_models/AvatarB.vrm'
+const socket = new WebSocket("ws://127.0.0.1:8765");
+
 
 class ModelViewer {
     constructor() {
@@ -20,10 +23,30 @@ class ModelViewer {
         this.dragStartModelPosition = new THREE.Vector3();
         this.setupDragHandlers();
         this.draggedObject = null;
-        this.setupMouseWheelZoom();
 
         // Добавляем mixer для анимаций
         this.mixer = null;
+        this.animationActions = [];
+        this.activeAction = null;
+        this.lastAction = null;
+        this.modelReady = false;
+
+        // Загрузчики
+        this.gltfLoader = new GLTFLoader();
+        this.fbxLoader = new FBXLoader();
+
+        // Группа для модели
+        this.modelGroup = new THREE.Group();
+        this.scene.add(this.modelGroup);
+
+        // Хранилище предзагруженных моделей
+        this.preloadedAssets = new Map(); // Инициализируем Map
+
+        this.vrm = null; // Храним VRM-модель
+
+        // Подключение WebSocket
+        this.socket = new WebSocket("ws://127.0.0.1:8765");
+        this.socket.onmessage = this.handleWebSocketMessage.bind(this);
     }
 
     async initScene() {
@@ -46,7 +69,7 @@ class ModelViewer {
             alpha: true,
         });
 
-        this.model = MODEL_PATH
+        this.model = MODEL_PATH;
         console.log("Model init from: ", this.model);
 
         try {
@@ -73,24 +96,85 @@ class ModelViewer {
         this.directionalLight.castShadow = true;
         this.scene.add(this.ambientLight, this.directionalLight);
 
-        // Загрузчик и таймер
-        this.loader = new GLTFLoader();
-        this.clock = new THREE.Clock();
-        this.mixer = null;
-
-        this.preloadedAssets = new Map();
-        this.currentModelIndex = 0;
-        this.modelGroup = new THREE.Group();
-        this.scene.add(this.modelGroup);
-
         // LOD (Level of Detail)
         this.lod = new THREE.LOD();
         this.scene.add(this.lod);
     }
 
-    async preloadModel() {
-        console.log("Model at initialization");
+    handleWebSocketMessage(event) {
+        const rawData = event.data;
+        console.log("Получены данные:", rawData);
 
+        if (rawData.includes("/VMC/Ext/Bone/Pos")) {
+            const boneData = this.parseBonePosition(rawData);
+            this.updateModel(boneData);
+        } else if (rawData.includes("/VMC/Ext/Blend/Apply")) {
+            const blendshapeData = this.parseBlendshapes(rawData);
+            this.updateBlendshapes(blendshapeData);
+        }
+    }
+
+    parseBonePosition(rawData) {
+        const parts = rawData.split(",");
+        const boneName = parts[2];
+        const position = {
+            x: parseFloat(parts[3]),
+            y: parseFloat(parts[4]),
+            z: parseFloat(parts[5])
+        };
+        const rotation = {
+            x: parseFloat(parts[6]),
+            y: parseFloat(parts[7]),
+            z: parseFloat(parts[8]),
+            w: parseFloat(parts[9])
+        };
+        return { boneName, position, rotation };
+    }
+
+    updateModel(boneData) {
+        if (!this.vrm) {
+            console.warn("VRM model is not loaded.");
+            return;
+        }
+
+        const bone = this.vrm.humanoid.getBoneNode(boneData.boneName);
+        if (bone) {
+            bone.position.set(boneData.position.x, boneData.position.y, boneData.position.z);
+            bone.quaternion.set(
+                boneData.rotation.x,
+                boneData.rotation.y,
+                boneData.rotation.z,
+                boneData.rotation.w
+            );
+        } else {
+            console.warn(`Bone "${boneData.boneName}" not found in VRM model.`);
+        }
+    }
+
+    parseBlendshapes(rawData) {
+        const parts = rawData.split(",");
+        const blendshapes = {};
+        for (let i = 2; i < parts.length; i += 2) {
+            const name = parts[i];
+            const value = parseFloat(parts[i + 1]);
+            blendshapes[name] = value;
+        }
+        return blendshapes;
+    }
+
+    updateBlendshapes(blendshapeData) {
+        if (!this.vrm || !this.vrm.expressionManager) {
+            console.warn("VRM expression manager is not available.");
+            return;
+        }
+
+        for (const [name, value] of Object.entries(blendshapeData)) {
+            this.vrm.expressionManager.setValue(name, value);
+        }
+        this.vrm.expressionManager.update();
+    }
+
+    async preloadModel() {
         if (!this.model) {
             console.error("Model is None?");
             return;
@@ -103,29 +187,18 @@ class ModelViewer {
                 throw new Error(`Failed to load model: ${this.model}`);
             }
             const arrayBuffer = await response.arrayBuffer();
-            
+
             // gltf and vrm
-            let currentVrm = undefined;
             const loader = new GLTFLoader();
             loader.crossOrigin = 'anonymous';
-
-            loader.register( ( parser ) => {
-
-				// create a WebGPU compatible MToonMaterialLoaderPlugin
-				const mtoonMaterialPlugin = new MToonMaterialLoaderPlugin( parser, {
-
-					// set the material type to MToonNodeMaterial
-					materialType: MToonNodeMaterial,
-
-				} );
-
-				return new VRMLoaderPlugin( parser, {
-
-					mtoonMaterialPlugin,
-
-				} );
-
-			} );
+            loader.register((parser) => {
+                const mtoonMaterialPlugin = new MToonMaterialLoaderPlugin(parser, {
+                    materialType: MToonNodeMaterial,
+                });
+                return new VRMLoaderPlugin(parser, {
+                    mtoonMaterialPlugin,
+                });
+            });
 
             loader.parse(arrayBuffer, '', (gltf) => {
                 this.preloadedAssets.set(this.model, gltf);
@@ -141,6 +214,12 @@ class ModelViewer {
 
     loadModel(gltf) {
         try {
+            // Проверяем, существует ли modelGroup
+            if (!this.modelGroup) {
+                console.error("modelGroup is not initialized.");
+                return;
+            }
+
             // Очистка предыдущей модели
             this.modelGroup.clear();
             if (this.mixer) {
@@ -149,11 +228,9 @@ class ModelViewer {
             }
 
             const vrm = gltf.userData.vrm; // Получаем VRM-модель
-
             if (vrm) {
                 console.log('VRM model loaded:', vrm);
                 this.modelGroup.add(vrm.scene); // Добавляем модель в группу
-                console.log(vrm);
 
                 // Настройка морфинга (например, улыбка)
                 const expressionManager = vrm.expressionManager;
@@ -163,18 +240,45 @@ class ModelViewer {
                 }
 
                 // Настройка анимаций
-                if (gltf.animations.length > 0) {
-                    this.mixer = new THREE.AnimationMixer(vrm.scene);
-                    this.mixer.clipAction(gltf.animations[0]).play();
-                }
+                this.mixer = new THREE.AnimationMixer(vrm.scene);
 
-                this.updateFaceExpression(vrm, 'happy', 1.0);
             } else {
                 console.warn('Loaded model is not a VRM.');
             }
         } catch (error) {
             console.error('Model loading failed:', error);
         }
+    }
+
+    setActiveAction(toAction) {
+        if (toAction !== this.activeAction) {
+            if (this.activeAction) {
+                this.activeAction.fadeOut(0.5);
+            }
+
+            this.activeAction = toAction;
+            this.activeAction.reset();
+            this.activeAction.fadeIn(0.5);
+            this.activeAction.play();
+        }
+    }
+
+    toggleAnimation() {
+        if (this.mixer) {
+            this.mixer.timeScale = this.mixer.timeScale === 0 ? 1 : 0;
+        }
+    }
+
+    async animate() {
+        if (!this.camera || !this.renderer || !this.scene) return;
+
+        requestAnimationFrame(() => this.animate());
+
+        const delta = this.clock.getDelta();
+        if (this.mixer) this.mixer.update(delta);
+        if (this.controls) this.controls.update();
+
+        await this.renderer.renderAsync(this.scene, this.camera);
     }
 
     initControls() {
@@ -187,7 +291,7 @@ class ModelViewer {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 1;
-        this.controls.minDistance = 0.1;
+        this.controls.minDistance = 0.01;
         this.controls.maxDistance = 7;
     }
 
@@ -253,62 +357,11 @@ class ModelViewer {
         this.controls.enabled = true;
     }
 
-    setupMouseWheelZoom() {
-        window.addEventListener('wheel', (event) => this.onMouseWheel(event), { passive: false });
-    }
-    
-    onMouseWheel(event) {
-        const mouse = new THREE.Vector2();
-        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(mouse, this.camera);
-
-        const intersects = raycaster.intersectObjects(this.scene.children, true);
-        if (intersects.length > 0) {
-            const targetPoint = intersects[0].point;
-
-            const zoomFactor = event.deltaY > 0 ? 1.1 : 0.9;
-            const direction = new THREE.Vector3().subVectors(targetPoint, this.camera.position).normalize();
-            const distance = this.camera.position.distanceTo(targetPoint);
-
-            this.camera.position.addScaledVector(direction, (zoomFactor - 1) * distance * 0.5);
-            this.controls.target.copy(targetPoint);
-            this.controls.update();
-        }
-
-        event.preventDefault();
-    }
-
-    initAudio() {
-        // Аудио система
-        this.audioListener = new THREE.AudioListener();
-        this.camera.add(this.audioListener);
-
-        // Фоновая музыка
-        this.backgroundMusic = new THREE.Audio(this.audioListener);
-        new THREE.AudioLoader().load('http://127.0.0.1:5500/tools/sounds/forest-sound.mp3', buffer => {
-            this.backgroundMusic.setBuffer(buffer);
-            this.backgroundMusic.setLoop(true);
-            this.backgroundMusic.setVolume(0.3);
-            this.backgroundMusic.play();
-        });
-
-        // Звуки кликов
-        this.clickSound = new THREE.Audio(this.audioListener);
-        new THREE.AudioLoader().load('http://127.0.0.1:5500/tools/sounds/clicking.mp3', buffer => {
-            this.clickSound.setBuffer(buffer);
-            this.clickSound.setVolume(0.5);
-        });
-    }
-
     setupEventListeners() {
         // Обработка событий
         window.addEventListener('resize', () => this.onWindowResize());
         window.addEventListener('click', e => this.handleClick(e));
         document.addEventListener('keydown', e => {
-            if (e.key === 'm') this.nextModel();
             if (e.key === ' ') this.toggleAnimation();
         });
         document.addEventListener('click', () => {
@@ -316,18 +369,6 @@ class ModelViewer {
                 THREE.AudioContext.getContext().resume();
             }
         }, { once: true });
-    }
-
-    nextModel() {
-        this.currentModelIndex = (this.currentModelIndex + 1) % this.model.length;
-        this.loadModel();
-        this.playSound(this.clickSound);
-    }
-
-    toggleAnimation() {
-        if (this.mixer) {
-            this.mixer.timeScale = this.mixer.timeScale === 0 ? 1 : 0;
-        }
     }
 
     updateFaceExpression(vrm, expressionName, weight) {
@@ -364,28 +405,38 @@ class ModelViewer {
         }
     }
 
-    playSound(sound) {
-        if (sound.isPlaying) sound.stop();
-        sound.play();
-    }
-
     onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    async animate() {
-        if (!this.camera || !this.renderer || !this.scene) return;
-    
-        requestAnimationFrame(() => this.animate());
-    
-        const delta = this.clock.getDelta();
-        if (this.mixer) this.mixer.update(delta);
-        if (this.controls) this.controls.update();
-    
-        await this.renderer.renderAsync(this.scene, this.camera);
-    }    
+    initAudio() {
+        // Аудио система
+        this.audioListener = new THREE.AudioListener();
+        this.camera.add(this.audioListener);
+
+        // Фоновая музыка
+        // this.backgroundMusic = new THREE.Audio(this.audioListener);
+        // new THREE.AudioLoader().load('http://127.0.0.1:5500/tools/sounds/forest-sound.mp3', buffer => {
+        //     this.backgroundMusic.setBuffer(buffer);
+        //     this.backgroundMusic.setLoop(true);
+        //     this.backgroundMusic.setVolume(0.3);
+        //     this.backgroundMusic.play();
+        // });
+
+        // Звуки кликов
+        this.clickSound = new THREE.Audio(this.audioListener);
+        new THREE.AudioLoader().load('http://127.0.0.1:5500/tools/sounds/clicking.mp3', buffer => {
+            this.clickSound.setBuffer(buffer);
+            this.clickSound.setVolume(0.5);
+        });
+    }
+
+    playSound(sound) {
+        if (sound.isPlaying) sound.stop();
+        sound.play();
+    }
 }
 
 // Инициализация приложения
