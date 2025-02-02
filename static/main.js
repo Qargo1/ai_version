@@ -23,7 +23,7 @@ class ModelViewer {
         this.vrm = null;
 
         this.isAnimating = true; // Флаг для управления анимацией
-        this.isAnimationData = true; // Флаг для отслеживания, загрузилась ли анимация
+        this.isAnimationData = false; // Флаг для отслеживания, загрузилась ли анимация
 
         // Группа для модели:
         this.modelGroup = new THREE.Group();
@@ -55,16 +55,20 @@ class ModelViewer {
 
     // Функция для обновления эмоции
     changeEmotion() {
-        // Получаем доступ к Expression Manager
+        if (!this.vrm || !this.vrm.expressionManager) {
+            console.error("Expression manager is not available.");
+            return;
+        }
+
         const expressionManager = this.vrm.expressionManager;
 
-        // Пример выбора случайного выражения из доступных
-        const expressions = ["happy", "sad", "angry", "surprised", "blink"];
-        const randomExpression = expressions[Math.floor(Math.random() * expressions.length)];
+        // Выбираем случайное выражение из заранее определенного списка
+        const randomExpression = this.getRandomEmotion();
 
-        // Устанавливаем выражение
-        expressionManager.setValue(randomExpression, 1);  // Установить выражение в 100% интенсивности
-        console.log("randomExpression is", randomExpression); 
+        // Устанавливаем новое выражение
+        expressionManager.setValue(randomExpression, 1); // Установить выражение в 100% интенсивности
+        this.vrm.expressionManager.update();
+        console.log("randomExpression is", randomExpression);
     }
 
     // Функция для вызова смены эмоции каждые 5 секунд
@@ -88,18 +92,15 @@ class ModelViewer {
             return; // Прекращаем анимацию, если флаг установлен в false
         }
     
-        requestAnimationFrame(this.animate);
+        requestAnimationFrame(this.animate);  // Обновление кадра
     
         if (this.mixer && typeof this.mixer.update === 'function') {
-            this.mixer.update(this.clock.getDelta());
-        } else {
-            console.error("No mixer found. Ensure you've loaded a VRM model and animations.");
-            this.stopAnimation(); // Останавливаем анимацию
-            return;
+            this.mixer.update(this.clock.getDelta());  // Обновление анимации
         }
     
-        this.renderer.renderAsync(this.scene, this.camera);
+        this.renderer.renderAsync(this.scene, this.camera);  // Рендерим сцену
     };
+    
 
     startAnimation() {
         if (this.mixer && typeof this.mixer.update === 'function') {
@@ -271,12 +272,13 @@ class ModelViewer {
             console.error("Model path not defined.");
             return;
         }
+    
         try {
             console.log(`Loading model from: ${MODEL_PATH}`);
             const response = await fetch(MODEL_PATH);
             if (!response.ok) throw new Error(`Failed to load model: ${MODEL_PATH}`);
             const arrayBuffer = await response.arrayBuffer();
-
+    
             const loader = new GLTFLoader();
             loader.crossOrigin = 'anonymous';
             loader.register(parser => {
@@ -287,36 +289,40 @@ class ModelViewer {
                     mtoonMaterialPlugin,
                 });
             });
-
+    
             loader.parse(arrayBuffer, '', async (gltf) => {
                 if (gltf.userData && gltf.userData.vrm) {
                     this.vrm = gltf.userData.vrm;
+    
+                    // Добавляем модель в сцену даже если анимация не загружена
                     this.modelGroup.add(this.vrm.scene);
-
-                    // Устанавливаем начальное положение модели
                     this.vrm.scene.position.set(0.05, -1, 0);  // Пример: перемещение модели на 1 единицу вверх по оси Y
+                    console.log(this.modelGroup);
+                    console.log(this.vrm.scene);
 
-                    // Если анимация не загружена, пропускаем настройку анимации
+                    // Если анимация включена, загружаем анимацию
                     if (this.isAnimationData) {
                         const animationData = await this.loadAnimationData(PATH_TO_ANIMATION);
                         if (!animationData) {
                             console.error("Failed to load animation data.");
-                            return;
+                        } else {
+                            this.mixer = await this.setupAnimation(this.vrm, animationData);
+                            console.log("mixer loaded successfully", this.mixer);
                         }
-                        this.mixer = await this.setupAnimation(this.vrm, animationData);
-                        console.log("mixer loaded successfully", this.mixer);
                     } else {
                         console.log("Animation data not found, skipping animation setup.");
+                        this.animate();
                     }
-
+    
                 } else {
                     console.error("VRM not found in the model.");
                 }
             }, error => console.error("Error parsing model:", error));
+    
         } catch (error) {
             console.error("Preloading failed:", error);
         }
-    }
+    }        
     
     setActiveAction(toAction) {
         if (toAction !== this.activeAction) {
