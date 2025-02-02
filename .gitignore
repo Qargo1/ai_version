@@ -36,4 +36,6 @@ static/three.js/
 tools/xr_animator/
 tools/xr_animator
 
+bpy_env/
+
 
