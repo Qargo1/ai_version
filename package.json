@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.3.4",
+    "osc": "^2.4.5",
+    "osc-min": "^2.1.2",
+    "osc-msg": "^1.2.0",
+    "three": "^0.173.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.11"
+  },
+  "scripts": {
+        "dev": "vite",
+        "build": "vite build"
+    }
+}
