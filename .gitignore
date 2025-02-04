@@ -7,12 +7,6 @@ ENV/
 env.bak/
 venv.bak/
 
-# Игнорировать виртуальное окружение
-.venv/
-
-# Игнорировать папку info/software
-info/software/
-
 # Игнорировать папку models/llm
 models/
 
@@ -24,18 +18,4 @@ recording.wav
 test.wav
 .env
 
-node_modules/
-
-ffmpeg.exe
-ffprobe.exe
-
-trashcan/
-
-static/three.js/
-
-tools/xr_animator/
-tools/xr_animator
-
-bpy_env/
-
-
+INFO
