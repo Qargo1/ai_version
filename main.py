@@ -1,8 +1,8 @@
-from tools.train import GPTQTrainer, DEFAULT_CONFIG, TrainingScheduler
+'''
+#from tools.train import GPTQTrainer, DEFAULT_CONFIG, TrainingScheduler
 import threading
-from tools.sound import AudioManager, DEFAULT_VOICE_CONFIG
-from PyQt5.QtWidgets import QMainWindow
-from tools.avatar import AvatarController, AvatarConfig
+#from tools.sound import AudioManager, DEFAULT_VOICE_CONFIG
+#from tools.avatar import AvatarController, AvatarConfig
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -10,14 +10,20 @@ from transformers import (
 )
 from peft import PeftConfig, PeftModel
 import psutil
-import torch
 import json
 import os
 import speech_recognition as sr
-from gptqmodel import GPTQModel, QuantizeConfig
+#from gptqmodel import GPTQModel, QuantizeConfig
+'''
+
+import sys
+#from PyQt5.QtWidgets import QApplication
+#from PyQt5.QtWidgets import QMainWindow
+import torch
 
 import ollama
 import chromadb
+import psycopg
 from psycopg.rows import dict_row
 import ast
 from tqdm import tqdm
@@ -44,7 +50,6 @@ MODEL_NAME = "qwen"  # Путь к модели
 MEMORY_FILE = "tools/memory/memory_1.0.1.json"  # Файл для сохранения истории диалога
 ERRORS_FILE = "tools/memory/memory_errors.json"  # Файл для сохранения ошибок
 MAX_HISTORY = 50  # Ограничение на количество сообщений в памяти
-CONVO = []
 DB_PARAMS = {
     "dbname": "memory_agent",
     "user": "qargo",
@@ -249,21 +254,21 @@ class ChatBot:
         vector_db_name = 'conversations'
         
         try:
-            client.delete_cillection(name=vector_db_name)
+            client.delete_collection(name=vector_db_name)
         except ValueError:
             pass
         
         vector_db = client.create_collection(name=vector_db_name)
         
         for c in conversations:
-            seralized_convo = f'prompt: {c['prompt']} response: {c['response']}
+            seralized_convo = f'prompt: {c["prompt"]} response: {c["response"]}'
             response = ollama.embeddings(model='nomic-embed-text', prompt=seralized_convo)
             embedding = response['embedding']
             
             vector_db.add(
                 ids=[str(c['id'])],
                 embeddings=[embedding],
-                documents=[serialized_convo]
+                documents=[seralized_convo]
             )
             
     def retrieve_embeddings(self, queries, results_per_query=2):
@@ -307,7 +312,6 @@ class ChatBot:
         return response['message']['content'].strip().lower()
         
     def recall(self, prompt):
-    """Отвечает на вопросы с помощью инкрементального обучения."""
         queries = self.create_queries(prompt=prompt)
         embeddings = self.retrieve_embeddings(queries=queries)
         self.convo.append({'role': 'user', 'content': f'MEMORIES: {embeddings} \n\n USER PROMPT: {prompt}'})
@@ -335,7 +339,8 @@ class ChatBot:
         except Exception as e:
             print(f"Ошибка при инкрементальном обучении: {str(e)}")
 
-class MainWindow(QMainWindow):
+#class MainWindow(QMainWindow):
+class MainWindow():
     def __init__(self):
         super().__init__()
         '''
@@ -360,10 +365,10 @@ class MainWindow(QMainWindow):
 
         self.bot = ChatBot()  # Инициализация чат-бота
         
-        self.convo = ChatBot.convo
+        self.convo = CONVO
         
         self.conversations = self.bot.fetch_conversations()
-        self.bot.create_vector_db(conversations=conversations)
+        self.bot.create_vector_db(conversations=self.conversations)
 
     def start_chat_loop(self):
         """Основной цикл диалога."""
@@ -380,7 +385,7 @@ class MainWindow(QMainWindow):
                     self.bot.stream_response(prompt=prompt)
                 elif prompt[:7].lower() == '/forget':
                     self.bot.remove_last_conversation()
-                    self.convo = self.convo[:-2]
+                    self.convo = convo[:-2]
                     print('\n')
                 elif prompt[:9].lower() == '/memorize':
                     prompt = prompt[10:]
@@ -389,61 +394,61 @@ class MainWindow(QMainWindow):
                 else:
                     self.convo.append({'role': 'user', 'content': prompt})
                     self.bot.stream_response(prompt=prompt)
-
-                '''
-                user_input = self.bot.process_voice_input()  # Получение голосового ввода
-                if not user_input:
-                    continue
-                if self.bot.handle_command(user_input.lower()):  # Обработка команд
-                    break
-                self.bot.memory.append({"role": "user", "content": user_input})  # Добавление ввода в память
-                context = self.bot.format_context(self.bot.memory)  # Формирование контекста
-                response = self.bot.generate_response(context)  # Генерация ответа
-                self.bot.memory.append({"role": "assistant", "content": response})  # Добавление ответа в память
-
-                # Анимация речи аватара (если аватар доступен)
-                if self.use_avatar and self.avatar:
-                    try:
-                        self.avatar.animate_speech(response)  # Анимация речи аватара
-                    except Exception as e:
-                        print(f"Ошибка анимации аватара: {str(e)}")
-                        self.use_avatar = False  # Отключаем аватар при ошибке
-
-                # Воспроизведение ответа (если аудио доступно)
-                if self.bot.use_audio:
-                    try:
-                        self.bot.audio.speak(response)  # Воспроизведение ответа
-                    except Exception as e:
-                        print(f"Ошибка воспроизведения аудио: {str(e)}")
-                        self.bot.use_audio = False  # Отключаем аудио при ошибке
-
-                print(f"\nБот: {response}\n")
-                if len(self.bot.memory) > MAX_HISTORY:  # Ограничение истории
-                    self.bot.memory = self.bot.memory[-MAX_HISTORY:]
-
-                # Инкрементальное обучение
-                self.bot.incremental_learning([{"input": user_input, "output": response}])
-                '''
-        except KeyboardInterrupt:
-            print("\nЗавершение работы...")
-        '''
-        finally:
-            self.bot.save_memory(self.bot.memory, MEMORY_FILE)  # Сохранение памяти
-            self.bot.save_memory(self.bot.error_memory, ERRORS_FILE)  # Сохранение ошибок
-            trainer.train()  # Запуск обучения
-        '''
-
+        except Exception as e:
+            print(f"Ошибка в диалоге: {str(e)}")
+            
 if __name__ == "__main__":
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    window.start_chat_loop()
-    sys.exit(app.exec_())
+    #app = QApplication(sys.argv)
+    chat = MainWindow()
+    chat.start_chat_loop()
+    #window.show()
+    #window.start_chat_loop()
+    #sys.exit(app.exec_())
     
-    
+
 '''
+user_input = self.bot.process_voice_input()  # Получение голосового ввода
+if not user_input:
+    continue
+if self.bot.handle_command(user_input.lower()):  # Обработка команд
+    break
+self.bot.memory.append({"role": "user", "content": user_input})  # Добавление ввода в память
+context = self.bot.format_context(self.bot.memory)  # Формирование контекста
+response = self.bot.generate_response(context)  # Генерация ответа
+self.bot.memory.append({"role": "assistant", "content": response})  # Добавление ответа в память
+
+# Анимация речи аватара (если аватар доступен)
+if self.use_avatar and self.avatar:
+    try:
+        self.avatar.animate_speech(response)  # Анимация речи аватара
+    except Exception as e:
+        print(f"Ошибка анимации аватара: {str(e)}")
+        self.use_avatar = False  # Отключаем аватар при ошибке
+
+# Воспроизведение ответа (если аудио доступно)
+if self.bot.use_audio:
+    try:
+        self.bot.audio.speak(response)  # Воспроизведение ответа
+    except Exception as e:
+        print(f"Ошибка воспроизведения аудио: {str(e)}")
+        self.bot.use_audio = False  # Отключаем аудио при ошибке
+
+print(f"\nБот: {response}\n")
+if len(self.bot.memory) > MAX_HISTORY:  # Ограничение истории
+    self.bot.memory = self.bot.memory[-MAX_HISTORY:]
+
+# Инкрементальное обучение
+self.bot.incremental_learning([{"input": user_input, "output": response}])
+
+except KeyboardInterrupt:
+print("\nЗавершение работы...")
+
+finally:
+self.bot.save_memory(self.bot.memory, MEMORY_FILE)  # Сохранение памяти
+self.bot.save_memory(self.bot.error_memory, ERRORS_FILE)  # Сохранение ошибок
+trainer.train()  # Запуск обучения
+
+
 Комментарии и предложения:
 Обработка ошибок :
 Добавьте более детальную обработку ошибок, особенно в части голосового ввода и 
