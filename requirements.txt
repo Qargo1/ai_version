@@ -33,3 +33,6 @@ deepspeech
 coqui-stt-model-manager
 python-osc
 future_fstrings
+ollama
+chromadb
+psycopg
