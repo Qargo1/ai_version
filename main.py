@@ -40,7 +40,7 @@ recognizer = sr.Recognizer()  # Распознавание речи
 client = chromadb.Client()
 
 # Константы
-MODEL_NAME = "models/llm/Qwen2.5-0.5B-Instruct-GPTQ-Int8"  # Путь к модели
+MODEL_NAME = "qwen"  # Путь к модели
 MEMORY_FILE = "tools/memory/memory_1.0.1.json"  # Файл для сохранения истории диалога
 ERRORS_FILE = "tools/memory/memory_errors.json"  # Файл для сохранения ошибок
 MAX_HISTORY = 50  # Ограничение на количество сообщений в памяти
@@ -78,6 +78,7 @@ class ChatBot:
         self.load_model()  # Загрузка модели и токенизатора
         
         self.conn = None #
+        self.model_name = MODEL_NAME
 
     def load_model(self):
         """Загружает GPTQ-модель и токенизатор."""
@@ -89,6 +90,7 @@ class ChatBot:
             self.tokenizer = None
 
     def model_configure(self):
+        pass
         '''
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         print("Токенизатор успешно загружен.")
@@ -152,7 +154,7 @@ class ChatBot:
             {'role': 'user', 'content': prompt},
         ]
         
-        response = ollama.chat(model=self.model, messages=query_convo)
+        response = ollama.chat(model=self.model_name, messages=query_convo)
         print(FORE.YELLOW + f'\nVector database queries: {response9["message"]["content"]} \n')
         
         try:
@@ -231,7 +233,7 @@ class ChatBot:
     
     def stream_response(self, prompt):
         response = ''
-        stream = ollama.chat(model=self.model, messages=self.convo, stream=True)
+        stream = ollama.chat(model=self.model_name, messages=self.convo, stream=True)
         print(Fore.LIGHTGREEN_EX + '\nASSISTANT:')
         
         for chunk in stream:
@@ -251,7 +253,7 @@ class ChatBot:
         except ValueError:
             pass
         
-        vector_db = client.create collection(name=vector_db_name)
+        vector_db = client.create_collection(name=vector_db_name)
         
         for c in conversations:
             seralized_convo = f'prompt: {c['prompt']} response: {c['response']}
@@ -271,7 +273,7 @@ class ChatBot:
             response = ollama.embeddings(model='nomic-embed-text', prompt=query)
             query_embeding = response['embedding']
             
-            vector_db = client.create collection(name='conversations')
+            vector_db = client.create_collection(name='conversations')
             results = vector_db.query(query_embeddings=[query_embedding], n_results=results_per_query)
             best_embeddings = results['documents'][0]
             
@@ -300,13 +302,13 @@ class ChatBot:
             {'role': 'user', 'content': f'SEARCH QUERY: {query} \n\nEMBEDDED CONTEXT: {context}'}
         ]
         
-        response = ollama.chat(model=self.model, messages=classify_convo)
+        response = ollama.chat(model=self.model_name, messages=classify_convo)
 
         return response['message']['content'].strip().lower()
         
     def recall(self, prompt):
     """Отвечает на вопросы с помощью инкрементального обучения."""
-        queries = create_queries(prompt=prompt)
+        queries = self.create_queries(prompt=prompt)
         embeddings = self.retrieve_embeddings(queries=queries)
         self.convo.append({'role': 'user', 'content': f'MEMORIES: {embeddings} \n\n USER PROMPT: {prompt}'})
         print(f'\n{len(embeddings)} message:response embeddings added for content')
@@ -375,7 +377,7 @@ class MainWindow(QMainWindow):
                 if prompt[:7].lower() == '/recall':
                     prompt = prompt[8:]
                     self.bot.recall(prompt=prompt)
-                    stream_response(prompt=prompt)
+                    self.bot.stream_response(prompt=prompt)
                 elif prompt[:7].lower() == '/forget':
                     self.bot.remove_last_conversation()
                     self.convo = self.convo[:-2]
@@ -386,11 +388,8 @@ class MainWindow(QMainWindow):
                     print('\n')
                 else:
                     self.convo.append({'role': 'user', 'content': prompt})
-                    stream_response(prompt=prompt)
-                
-                stream_response(prompt=prompt)
-                
-                
+                    self.bot.stream_response(prompt=prompt)
+
                 '''
                 user_input = self.bot.process_voice_input()  # Получение голосового ввода
                 if not user_input:
