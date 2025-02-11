@@ -25,3 +25,13 @@ INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAM
 INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAMP, 'What do i like?', 'You like Anime, cats, tech and your dreams');
 
 SELECT * FROM conversations;
+
+ollama local model:
+# zephyr-ollama/Modelfile
+FROM ./zephyr-ollama
+PARAMETER temperature 0.7
+PARAMETER num_ctx 4096
+TEMPLATE """{% for message in messages %}{{message['role']}}: {{message['content']}}{% endfor %}"""
+
+# Build model package
+ollama create zephyr -f ./zephyr-ollama/Modelfile

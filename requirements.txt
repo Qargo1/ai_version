@@ -36,3 +36,4 @@ future_fstrings
 ollama
 chromadb
 psycopg
+ast

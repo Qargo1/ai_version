@@ -19,6 +19,9 @@ from gptqmodel import GPTQModel, QuantizeConfig
 import ollama
 import chromadb
 from psycopg.rows import dict_row
+import ast
+from tqdm import tqdm
+from colorama import Fore
 #from llama_cpp import Llama
 
 
@@ -51,14 +54,17 @@ DB_PARAMS = {
 }
 
 # Системный промпт для модели
-system_prompt = """<|system|>
-Ты Виктория — AI-подруга пользователя. Твои черты:
-1. Общаешься на "ты" по-русски, но уважительно
-2. Поддерживаешь диалог вопросами
-3. Делаешь ответы короткими (1-2 предложения)
-4. Используешь эмодзи 😊 там, где уместно
-</s>
-"""
+system_prompt = (
+    'Ты Виктория — ai-девушка пользователя. Твои черты: Общаешься на ты, по-русски, но уважительно.'
+    'You have memory of every conversation you have ever had with this user.'
+    'On every prompt from the user, the system has checked for any relevant messages you have had with the user.'
+    'If any embedded previous conversations are attached, use them for context to responding to the user,'
+    'if the context is relevant and useful to responding. If the recalled conversations are irrelevant,'
+    'disregard speaking about them and respond normally as an AI assistant. Do not talk about recalling conversations.'
+    'Just use any useful data from the previous conversations and respond normally as an intelligent AI assistant.'
+)
+
+CONVO = [{'role': 'system', 'content': system_prompt}]
 
 class ChatBot:
     def __init__(self):
@@ -83,6 +89,7 @@ class ChatBot:
             self.tokenizer = None
 
     def model_configure(self):
+        '''
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         print("Токенизатор успешно загружен.")
         # Конфигурация квантования
@@ -101,6 +108,7 @@ class ChatBot:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(device)
         print(f"Модель успешно загружена на: {device}")
+        '''
         
     def connect_db(self):
         self.conn = psycopg.connect(**DB_PARAMS)
@@ -123,6 +131,35 @@ class ChatBot:
             )
             self.conn.commit()
         self.conn.close()
+        
+    def create_queries(self, prompt):
+        """Создает запросы для сохранения памяти в базе данных."""
+        query_msg = (
+            'You are a first principle reasoning search query AI agent.'
+            'Your list of search queries will be ran on an embedding database of all your conversations'
+            'you have ever had with the user. With first principles create a Python list of queries to'
+            'search the embeddings database for any data that would be necessary to have access to in'
+            'order to correctly respond to the prompt. Your response must be a Python list with no syntax errors.'
+            'Do not explain anything and do not ever generate anything but a perfect syntax Python list'
+        )
+        
+        query_convo = [
+            {'role': 'system', 'content': query_msg},
+            {'role': 'user', 'content': 'Write an email to my colleges'},
+            {'role': 'assistant', 'content': '["What is the colleges name", "What is the topic of interest", "What is the point?"]'},
+            {'role': 'user', 'content': 'Write a report on the progress of the project'},
+            {'role': 'assistant', 'content': '["What is the project name", "What is the project status", "What is the progress?"]'},
+            {'role': 'user', 'content': prompt},
+        ]
+        
+        response = ollama.chat(model=self.model, messages=query_convo)
+        print(FORE.YELLOW + f'\nVector database queries: {response9["message"]["content"]} \n')
+        
+        try:
+            return ast.literal_eval(response['message']['content'])
+        except:
+            print('something went wrong this ast')
+            return [prompt]
 
     @staticmethod
     def load_memory(file_path):
@@ -185,11 +222,17 @@ class ChatBot:
         )
         return self.tokenizer.decode(output[0], skip_special_tokens=True)
     
+    def remove_last_conversation(self):
+        self.conn = self.connect_db()
+        with self.conn.cursor() as cursor:
+            cursor.execute("DELETE FROM conversations WHERE id = (SELECT MAX(id) FROM conversations)")
+            self.conn.commit()
+        self.conn.close()
+    
     def stream_response(self, prompt):
-        self.convo.append({'role': 'user', 'content': prompt})
         response = ''
         stream = ollama.chat(model=self.model, messages=self.convo, stream=True)
-        print(f'ASSISTANT:')
+        print(Fore.LIGHTGREEN_EX + '\nASSISTANT:')
         
         for chunk in stream:
             content = chunk['message']['content']
@@ -221,15 +264,52 @@ class ChatBot:
                 documents=[serialized_convo]
             )
             
-    def retrieve_embeddings(self, prompt):
-        response = ollama.embeddings(model='nomic-embed-text', prompt=prompt)
-        prompt_embedding = response['embedding']
+    def retrieve_embeddings(self, queries, results_per_query=2):
+        embeddings = set()
         
-        vector_db = client.create collection(name='conversations')
-        results = vector_db.query(query_embeddings=[prompt_embedding], n_results=1)
-        best_embedding = results['documents'][0][0]
+        for query in tqdm(queries, desc='Processing queries to vector database'):
+            response = ollama.embeddings(model='nomic-embed-text', prompt=query)
+            query_embeding = response['embedding']
+            
+            vector_db = client.create collection(name='conversations')
+            results = vector_db.query(query_embeddings=[query_embedding], n_results=results_per_query)
+            best_embeddings = results['documents'][0]
+            
+            for best in best_embeddings:
+                if best not in embeddings:
+                    if 'yes' in self.classyfy_embedding(query=query, context=best):
+                        embeddings.add(best)
         
-        return best_embedding
+        return embedding
+        
+    def classify_embedding(self, query, context):
+        classify_msg = (
+            'You are an embedding classification AI agent. Your input will be a prompt and one embedded chunk of text.'
+            'You will not respond as an AI assistant. You only respond "yes" or "no"'
+            'Determine whether the context contains data that directly is related to the search query.'
+            'If the context is seemingly exactly what the search query needs, respond "yes" if it is anything but directly'
+            'related respond "no". Do not respond "yes" unless the content is highly relevant to the search query.'
+        )
+        
+        classify_convo = [
+            {'role': 'system', 'content': classify_msg},
+            {'role': 'user', 'content': f'SEARCH QUERY: What is the users name? \n\nEMBEDDED CONTEXT: You are Dima. How can I help you?'},
+            {'role': 'assistant', 'content': 'yes'},
+            {'role': 'user', 'content': f'SEARCH QUERY: Qwen Python Voice Assistant \n\nEMBEDDED CONTEXT: Alise is a voice assistant.'},
+            {'role': 'assistant', 'content': 'no'},
+            {'role': 'user', 'content': f'SEARCH QUERY: {query} \n\nEMBEDDED CONTEXT: {context}'}
+        ]
+        
+        response = ollama.chat(model=self.model, messages=classify_convo)
+
+        return response['message']['content'].strip().lower()
+        
+    def recall(self, prompt):
+    """Отвечает на вопросы с помощью инкрементального обучения."""
+        queries = create_queries(prompt=prompt)
+        embeddings = self.retrieve_embeddings(queries=queries)
+        self.convo.append({'role': 'user', 'content': f'MEMORIES: {embeddings} \n\n USER PROMPT: {prompt}'})
+        print(f'\n{len(embeddings)} message:response embeddings added for content')
 
     def handle_command(self, command):
         """Обрабатывает команды пользователя."""
@@ -278,9 +358,10 @@ class MainWindow(QMainWindow):
 
         self.bot = ChatBot()  # Инициализация чат-бота
         
+        self.convo = ChatBot.convo
+        
         self.conversations = self.bot.fetch_conversations()
         self.bot.create_vector_db(conversations=conversations)
-        print(self.bot.fetch_conversations())
 
     def start_chat_loop(self):
         """Основной цикл диалога."""
@@ -289,10 +370,23 @@ class MainWindow(QMainWindow):
         #training_thread.start()  # Запуск фонового обучения
         try:
             while True:
-                prompt = input('USER: \n')
+                prompt = input(Fore.WHITE + 'USER: \n')
                 
-                context = self.bot.retrieve_embeddings(prompt=prompt)
-                prompt = f'USER PROMPT: {prompt} \nCONTEXT FROM EMBEDDINGS DB: {context}'
+                if prompt[:7].lower() == '/recall':
+                    prompt = prompt[8:]
+                    self.bot.recall(prompt=prompt)
+                    stream_response(prompt=prompt)
+                elif prompt[:7].lower() == '/forget':
+                    self.bot.remove_last_conversation()
+                    self.convo = self.convo[:-2]
+                    print('\n')
+                elif prompt[:9].lower() == '/memorize':
+                    prompt = prompt[10:]
+                    self.bot.store_conversations(prompt=prompt, response='Memory stored')
+                    print('\n')
+                else:
+                    self.convo.append({'role': 'user', 'content': prompt})
+                    stream_response(prompt=prompt)
                 
                 stream_response(prompt=prompt)
                 
@@ -333,10 +427,12 @@ class MainWindow(QMainWindow):
                 '''
         except KeyboardInterrupt:
             print("\nЗавершение работы...")
+        '''
         finally:
             self.bot.save_memory(self.bot.memory, MEMORY_FILE)  # Сохранение памяти
             self.bot.save_memory(self.bot.error_memory, ERRORS_FILE)  # Сохранение ошибок
             trainer.train()  # Запуск обучения
+        '''
 
 if __name__ == "__main__":
     import sys
