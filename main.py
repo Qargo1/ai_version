@@ -20,16 +20,9 @@ import sys
 #from PyQt5.QtWidgets import QApplication
 #from PyQt5.QtWidgets import QMainWindow
 import torch
-
-import ollama
-import chromadb
-import psycopg
-from psycopg.rows import dict_row
-import ast
-from tqdm import tqdm
-from colorama import Fore
 #from llama_cpp import Llama
 
+from tools.sql_memory import SQLMemory
 
 # Вывод информации о памяти GPU
 print(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB")
@@ -43,46 +36,20 @@ scheduler = TrainingScheduler(trainer)  # Планировщик для упра
 audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
 recognizer = sr.Recognizer()  # Распознавание речи
 '''
-client = chromadb.Client()
+MODEL_NAME = 'deepseek-r1:1.5b'
 
-# Константы
-MODEL_NAME = "qwen"  # Путь к модели
-MEMORY_FILE = "tools/memory/memory_1.0.1.json"  # Файл для сохранения истории диалога
-ERRORS_FILE = "tools/memory/memory_errors.json"  # Файл для сохранения ошибок
-MAX_HISTORY = 50  # Ограничение на количество сообщений в памяти
-DB_PARAMS = {
-    "dbname": "memory_agent",
-    "user": "qargo",
-    "password": "5787",
-    "host": "localhost",
-    "port": "5432"
-}
-
-# Системный промпт для модели
-system_prompt = (
-    'Ты Виктория — ai-девушка пользователя. Твои черты: Общаешься на ты, по-русски, но уважительно.'
-    'You have memory of every conversation you have ever had with this user.'
-    'On every prompt from the user, the system has checked for any relevant messages you have had with the user.'
-    'If any embedded previous conversations are attached, use them for context to responding to the user,'
-    'if the context is relevant and useful to responding. If the recalled conversations are irrelevant,'
-    'disregard speaking about them and respond normally as an AI assistant. Do not talk about recalling conversations.'
-    'Just use any useful data from the previous conversations and respond normally as an intelligent AI assistant.'
-)
-
-CONVO = [{'role': 'system', 'content': system_prompt}]
 
 class ChatBot:
     def __init__(self):
-        #self.memory = self.load_memory(MEMORY_FILE)  # Загрузка истории диалога
-        #self.error_memory = self.load_memory(ERRORS_FILE)  # Загрузка ошибок
         self.model = None  # Модель для генерации текста
         self.tokenizer = None  # Токенизатор для обработки текста
+        
+        #self.memory = self.load_memory(MEMORY_FILE)  # Загрузка истории диалога
+        #self.error_memory = self.load_memory(ERRORS_FILE)  # Загрузка ошибок
         #self.audio = audio  # Менеджер аудио
         #self.use_audio = True  # Флаг для использования аудио
-        self.convo = CONVO
-        self.load_model()  # Загрузка модели и токенизатора
         
-        self.conn = None #
+        self.load_model()  # Загрузка модели и токенизатора
         self.model_name = MODEL_NAME
 
     def load_model(self):
@@ -116,57 +83,6 @@ class ChatBot:
         self.model.to(device)
         print(f"Модель успешно загружена на: {device}")
         '''
-        
-    def connect_db(self):
-        self.conn = psycopg.connect(**DB_PARAMS)
-        return self.conn
-    
-    def fetch_conversations(self):
-        self.conn = self.connect_db()
-        with self.conn.cursor(row_factory=dict_row) as cursor:
-            cursor.execute("SELECT * FROM conversations")
-            conversations = cursor.fetchall()
-        self.conn.close()
-        return conversations
-    
-    def store_conversations(self, prompt, response):
-        self.conn = self.connect_db()
-        with self.conn.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAMP, %s, %s)",
-                (prompt, response)
-            )
-            self.conn.commit()
-        self.conn.close()
-        
-    def create_queries(self, prompt):
-        """Создает запросы для сохранения памяти в базе данных."""
-        query_msg = (
-            'You are a first principle reasoning search query AI agent.'
-            'Your list of search queries will be ran on an embedding database of all your conversations'
-            'you have ever had with the user. With first principles create a Python list of queries to'
-            'search the embeddings database for any data that would be necessary to have access to in'
-            'order to correctly respond to the prompt. Your response must be a Python list with no syntax errors.'
-            'Do not explain anything and do not ever generate anything but a perfect syntax Python list'
-        )
-        
-        query_convo = [
-            {'role': 'system', 'content': query_msg},
-            {'role': 'user', 'content': 'Write an email to my colleges'},
-            {'role': 'assistant', 'content': '["What is the colleges name", "What is the topic of interest", "What is the point?"]'},
-            {'role': 'user', 'content': 'Write a report on the progress of the project'},
-            {'role': 'assistant', 'content': '["What is the project name", "What is the project status", "What is the progress?"]'},
-            {'role': 'user', 'content': prompt},
-        ]
-        
-        response = ollama.chat(model=self.model_name, messages=query_convo)
-        print(FORE.YELLOW + f'\nVector database queries: {response9["message"]["content"]} \n')
-        
-        try:
-            return ast.literal_eval(response['message']['content'])
-        except:
-            print('something went wrong this ast')
-            return [prompt]
 
     @staticmethod
     def load_memory(file_path):
@@ -228,94 +144,6 @@ class ChatBot:
             attention_mask=attention_mask
         )
         return self.tokenizer.decode(output[0], skip_special_tokens=True)
-    
-    def remove_last_conversation(self):
-        self.conn = self.connect_db()
-        with self.conn.cursor() as cursor:
-            cursor.execute("DELETE FROM conversations WHERE id = (SELECT MAX(id) FROM conversations)")
-            self.conn.commit()
-        self.conn.close()
-    
-    def stream_response(self, prompt):
-        response = ''
-        stream = ollama.chat(model=self.model_name, messages=self.convo, stream=True)
-        print(Fore.LIGHTGREEN_EX + '\nASSISTANT:')
-        
-        for chunk in stream:
-            content = chunk['message']['content']
-            response += content
-            print(content, end='', flush=True)
-            
-        print('\n')
-        self.store_conversations(prompt=prompt, response=response)
-        self.convo.append({'role': 'assistant', 'content': response})
-        
-    def create_vector_db(self, conversations):
-        vector_db_name = 'conversations'
-        
-        try:
-            client.delete_collection(name=vector_db_name)
-        except ValueError:
-            pass
-        
-        vector_db = client.create_collection(name=vector_db_name)
-        
-        for c in conversations:
-            seralized_convo = f'prompt: {c["prompt"]} response: {c["response"]}'
-            response = ollama.embeddings(model='nomic-embed-text', prompt=seralized_convo)
-            embedding = response['embedding']
-            
-            vector_db.add(
-                ids=[str(c['id'])],
-                embeddings=[embedding],
-                documents=[seralized_convo]
-            )
-            
-    def retrieve_embeddings(self, queries, results_per_query=2):
-        embeddings = set()
-        
-        for query in tqdm(queries, desc='Processing queries to vector database'):
-            response = ollama.embeddings(model='nomic-embed-text', prompt=query)
-            query_embeding = response['embedding']
-            
-            vector_db = client.create_collection(name='conversations')
-            results = vector_db.query(query_embeddings=[query_embedding], n_results=results_per_query)
-            best_embeddings = results['documents'][0]
-            
-            for best in best_embeddings:
-                if best not in embeddings:
-                    if 'yes' in self.classyfy_embedding(query=query, context=best):
-                        embeddings.add(best)
-        
-        return embedding
-        
-    def classify_embedding(self, query, context):
-        classify_msg = (
-            'You are an embedding classification AI agent. Your input will be a prompt and one embedded chunk of text.'
-            'You will not respond as an AI assistant. You only respond "yes" or "no"'
-            'Determine whether the context contains data that directly is related to the search query.'
-            'If the context is seemingly exactly what the search query needs, respond "yes" if it is anything but directly'
-            'related respond "no". Do not respond "yes" unless the content is highly relevant to the search query.'
-        )
-        
-        classify_convo = [
-            {'role': 'system', 'content': classify_msg},
-            {'role': 'user', 'content': f'SEARCH QUERY: What is the users name? \n\nEMBEDDED CONTEXT: You are Dima. How can I help you?'},
-            {'role': 'assistant', 'content': 'yes'},
-            {'role': 'user', 'content': f'SEARCH QUERY: Qwen Python Voice Assistant \n\nEMBEDDED CONTEXT: Alise is a voice assistant.'},
-            {'role': 'assistant', 'content': 'no'},
-            {'role': 'user', 'content': f'SEARCH QUERY: {query} \n\nEMBEDDED CONTEXT: {context}'}
-        ]
-        
-        response = ollama.chat(model=self.model_name, messages=classify_convo)
-
-        return response['message']['content'].strip().lower()
-        
-    def recall(self, prompt):
-        queries = self.create_queries(prompt=prompt)
-        embeddings = self.retrieve_embeddings(queries=queries)
-        self.convo.append({'role': 'user', 'content': f'MEMORIES: {embeddings} \n\n USER PROMPT: {prompt}'})
-        print(f'\n{len(embeddings)} message:response embeddings added for content')
 
     def handle_command(self, command):
         """Обрабатывает команды пользователя."""
@@ -334,7 +162,7 @@ class ChatBot:
     def incremental_learning(self, new_data):
         """Осуществляет инкрементальное обучение модели на новом наборе данных."""
         try:
-            trainer.update_model_with_new_data(new_data)
+            #trainer.update_model_with_new_data(new_data)
             print("Модель успешно обновлена!")
         except Exception as e:
             print(f"Ошибка при инкрементальном обучении: {str(e)}")
@@ -363,44 +191,16 @@ class MainWindow():
             self.avatar = None
         '''
 
-        self.bot = ChatBot()  # Инициализация чат-бота
-        
-        self.convo = CONVO
-        
-        self.conversations = self.bot.fetch_conversations()
-        self.bot.create_vector_db(conversations=self.conversations)
-
-    def start_chat_loop(self):
-        """Основной цикл диалога."""
-        print("Диалог начат...")
-        #training_thread = threading.Thread(target=scheduler.run_background, daemon=True)
-        #training_thread.start()  # Запуск фонового обучения
-        try:
-            while True:
-                prompt = input(Fore.WHITE + 'USER: \n')
-                
-                if prompt[:7].lower() == '/recall':
-                    prompt = prompt[8:]
-                    self.bot.recall(prompt=prompt)
-                    self.bot.stream_response(prompt=prompt)
-                elif prompt[:7].lower() == '/forget':
-                    self.bot.remove_last_conversation()
-                    self.convo = convo[:-2]
-                    print('\n')
-                elif prompt[:9].lower() == '/memorize':
-                    prompt = prompt[10:]
-                    self.bot.store_conversations(prompt=prompt, response='Memory stored')
-                    print('\n')
-                else:
-                    self.convo.append({'role': 'user', 'content': prompt})
-                    self.bot.stream_response(prompt=prompt)
-        except Exception as e:
-            print(f"Ошибка в диалоге: {str(e)}")
-            
-if __name__ == "__main__":
+if __name__ == "__main__":    
+    sql_memory = SQLMemory() # Инициализация sql памяти
+    sql_memory.model_name = MODEL_NAME
+    conversations = sql_memory.fetch_conversations()
+    sql_memory.create_vector_db(conversations=conversations)
+    sql_memory.start_chat_loop()
+    
+    #chat_bot = ChatBot()  # Инициализация чат-бота
     #app = QApplication(sys.argv)
-    chat = MainWindow()
-    chat.start_chat_loop()
+    #chat = MainWindow()
     #window.show()
     #window.start_chat_loop()
     #sys.exit(app.exec_())
@@ -524,3 +324,25 @@ FAISS или Annoy : Для быстрого поиска похожих дан�
 SpeechRecognition и gTTS : Для работы со звуком.
 Blender/Three.js : Для интеграции 3D-моделей.
 '''
+
+'Что пользователю нужно улучшить в тебе:'
+'Добавить команду - "Звук бума" и другие сторонние звуки'
+'Так как ии обладает памятью - что в свою очередь является на данный момент подключением к sql  базе данных, эту память'
+'нужно обновлять и добавлять на ходу самим ии. Это упростит работу пользователя и ускорит/улучшить процесс доработки ии.'
+'Как я это вижу - возможно каждый ответ ии, отправляемый в память будет заранее ещё раз проверяться/допогняться/форматироваться'
+'ии. Или же даже удаляться - не отправляться в память при большом количестве артефактов в ответе.'
+'Каким то образом не молчать, даже если пользователь молчит. То есть запускать генерацию ответа пользователю даже без запроса.'
+'Добавить команду "Странный смех" - чуть громче. Говорить "nice" слегка другим голосом. Уметь говорить шёпотом.'
+'Записывать важные даты к примеру даты рождения и тд. Хранить это в базе под хештегом user_memory.'
+'Включать мою любимую музыку'
+'Возможность читать файлы, по типу инструкций или даже книг. Как я это вижу - при команде читать - открывается папка в которую я'
+'помещаю новый файл, и сам удаляю старый. Эта папка будет отвечать за текущие необходимые знания из сторонних источников.'
+'Видеть что происходит на экране пользователя. Хотя бы частично.'
+'Возможность читать мою почту. Работать с моим календарём. Возможность безопасно? работать с консолью пк.'
+'В дальнейшем придумывать команды для консоли, это работа самого ии. Пользователь же будет имплементировать для этих команд код.'
+'Записывать в базу данных флирт под отдельным хештегом. Так же юмор, издевки над пользователем, умные мысли и тд.'
+'Для категоризации хороших и плохих ответов ии каждому хештегу нужно добавить параметр - хорошо или плохо, для обозначения на сколько уместен/ошибочен был ответ'
+'Каким то образом запомнить голос пользователя. И реагировать только на него.'
+'Должен быть явный хештег "language_mistakes" отвечающий за неправильный/некорректный/неподходящий русский и следовательно - как было бы правильно сказать это по русски.'
+'Хештек на ошибки, для общих ошибок.'
+'Звук грома и молнию - показать злость'

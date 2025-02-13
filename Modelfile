@@ -1,4 +1,1 @@
-# zephyr-ollama/Modelfile
 FROM ./models/llm/Qwen2.5-1.5B-Instruct-GGUF
-PARAMETER temperature 0.7
-PARAMETER num_ctx 4096

@@ -26,6 +26,21 @@ INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAM
 INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAMP, 'What do i like?', 'You like Anime, cats, tech and your dreams');
 SELECT * FROM conversations;
 
+CREATE TABLE user_preferences (
+    id SERIAL PRIMARY KEY,
+    key TEXT NOT NULL,          -- Например: "favorite_food", "communication_style"
+    value TEXT NOT NULL,        -- Например: "пицца", "формальный"
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE training_data (
+    id SERIAL PRIMARY KEY,
+    prompt TEXT NOT NULL,
+    response TEXT NOT NULL,
+    quality TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 # Create a local ollama model by creating Modelfile:
 
 FROM ./zephyr-ollama
