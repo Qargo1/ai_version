@@ -1,3 +1,226 @@
+import os
+import json
+import torch
+import schedule
+import time
+from typing import List, Dict
+from datetime import datetime
+import pynvml
+from datasets import load_dataset
+from gptqmodel import GPTQModel, QuantizeConfig
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TrainingArguments,
+    Trainer,
+    DataCollatorForSeq2Seq
+)
+from safetensors.torch import load_file
+from peft import PeftConfig, PeftModel
+
+
+class GPTQTrainer:
+    """
+    Этот класс отвечает за инициализацию модели, подготовку данных и обучение модели.
+    """
+    def __init__(self, config: dict):
+        self.config = config
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = None
+        self.tokenizer = None
+        self._init_model()
+        self.experience_replay_buffer = []  # Буфер для Experience Replay
+    
+    def _init_model(self):
+        """Инициализация модели с GPTQ-квантованием"""
+        if self.model is None:
+            checkpoint_path = self.config["model_name"]
+            try:
+                self.model = GPTQModel.load(checkpoint_path, quant_config)  # Загрузка модели из весов
+                self.model.tie_weights()
+                print("Model layers:", self.model.config.architectures)
+            except Exception as e:
+                print(f"Ошибка загрузки модели: {e}")
+                raise
+        
+        # Загрузка токенизатора
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.config["model_name"],
+            use_fast=True
+        )
+        if self.tokenizer is None:
+            raise RuntimeError("Ошибка: токенизатор не был загружен! Проверьте путь к модели.")
+    
+    def _load_errors(self) -> List[Dict]:
+        """Загрузка и валидация ошибок"""
+        try:
+            with open(self.config["errors_path"], "r", encoding="utf-8") as f:
+                errors = json.load(f)
+                return [e for e in errors if self._validate_sample(e)]
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+    
+    def _validate_sample(self, sample: Dict) -> bool:
+        """Проверка корректности примера"""
+        required_keys = {"input", "output", "corrected"}
+        return all(key in sample for key in required_keys)
+    
+    def _prepare_dataset(self):
+        """Подготовка данных для обучения"""
+        errors = self._load_errors()
+        return [self._format_example(e) for e in errors]
+    
+    def _format_example(self, example: Dict) -> Dict:
+        """Форматирование примера для датасета"""
+        return {
+            "input_ids": self.tokenizer.encode(example['input'], truncation=True, padding=True),
+            "labels": self.tokenizer.encode(example['corrected'], truncation=True, padding=True)
+        }
+    
+    def train(self):
+        """Основной метод обучения"""
+        if self._check_vram() > self.config["max_vram"]:
+            raise MemoryError("Not enough VRAM for training")
+        
+        dataset = self._prepare_dataset()
+        if len(dataset) < self.config["min_samples"]:
+            return False
+        
+        training_args = TrainingArguments(
+            output_dir=self.config["output_dir"],
+            num_train_epochs=self.config["num_epochs"],
+            per_device_train_batch_size=self.config["batch_size"],
+            gradient_accumulation_steps=self.config["gradient_accumulation"],
+            learning_rate=self.config["learning_rate"],
+            fp16=True,
+            logging_steps=10,
+            optim="adamw_torch",
+            report_to="none",
+            gradient_checkpointing=True  # Добавляем gradient_checkpointing для экономии памяти
+        )
+        
+        trainer = Trainer(
+            model=self.model,
+            args=training_args,
+            train_dataset=dataset,
+            data_collator=DataCollatorForSeq2Seq(self.tokenizer, model=self.model)
+        )
+        
+        trainer.train()
+        self._save_model()
+        return True
+    
+    def _save_model(self):
+        """Сохранение модели"""
+        output_dir = os.path.join(
+            self.config["output_dir"],
+            f"model_{datetime.now().strftime('%Y%m%d_%H%M')}"
+        )
+        self.model.save_pretrained(output_dir)
+        self.tokenizer.save_pretrained(output_dir)
+    
+    def _check_vram(self) -> int:
+        """Проверка используемой VRAM"""
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        return info.used // 1024**2  # MB
+    
+    def incremental_learning(self, input_text: str, corrected_text: str):
+        """Инкрементное обучение на новых данных"""
+        new_data = [{"input": input_text, "corrected": corrected_text}]
+        self.experience_replay_buffer.extend(new_data)
+        
+        # Ограничиваем размер буфера
+        if len(self.experience_replay_buffer) > self.config.get("replay_buffer_size", 100):
+            self.experience_replay_buffer = self.experience_replay_buffer[-self.config["replay_buffer_size"]:]
+        
+        # Формируем датасет из буфера
+        dataset = [self._format_example(e) for e in self.experience_replay_buffer]
+        
+        training_args = TrainingArguments(
+            output_dir=self.config["output_dir"],
+            num_train_epochs=1,
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=1,
+            learning_rate=self.config["learning_rate"] / 10,  # Меньший шаг обучения
+            fp16=True,
+            logging_steps=1,
+            optim="adamw_torch",
+            report_to="none",
+            gradient_checkpointing=True  # Добавляем gradient_checkpointing для экономии памяти
+        )
+        
+        trainer = Trainer(
+            model=self.model,
+            args=training_args,
+            train_dataset=dataset,
+            data_collator=DataCollatorForSeq2Seq(self.tokenizer, model=self.model)
+        )
+        
+        trainer.train()
+        self._save_model()
+
+class TrainingScheduler:
+    def __init__(self, trainer: GPTQTrainer):
+        self.trainer = trainer
+        self._setup_schedule()
+    
+    def _setup_schedule(self):
+        """Настройка расписания"""
+        schedule.every().day.at("04:00").do(self._daily_training)
+        schedule.every(3).hours.do(self._check_for_errors)
+    
+    def _daily_training(self):
+        if self.trainer.train():
+            self._clean_old_models()
+    
+    def _check_for_errors(self):
+        if len(self.trainer._load_errors()) >= 5:
+            self.trainer.train()
+    
+    def _clean_old_models(self):
+        """Удаление старых моделей"""
+        models = sorted(os.listdir(self.trainer.config["output_dir"]))
+        for model in models[:-3]:  # Оставляем последние 3 модели
+            os.remove(os.path.join(self.trainer.config["output_dir"], model))
+    
+    def run_background(self):
+        """Запуск в фоновом режиме"""
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+
+# Пример конфигурации
+DEFAULT_CONFIG = {
+    "model_name": r"models\llm\Qwen2.5-0.5B-Instruct-GPTQ-Int8",
+    "device": "cuda",
+    "torch_dtype": "auto",
+    "errors_path": "memory/memory_errors.json",
+    "output_dir": "./models/llm",
+    "num_epochs": 1,
+    "batch_size": 2,
+    "gradient_accumulation": 4,
+    "learning_rate": 3e-5,
+    "max_vram": 10000,  # 10GB
+    "min_samples": 5,
+    "replay_buffer_size": 100  # Размер буфера для Experience Replay
+}
+
+quant_config = QuantizeConfig(bits=8, group_size=128)
+
+# Инициализация и запуск
+if __name__ == "__main__":
+    trainer = GPTQTrainer(DEFAULT_CONFIG)
+    scheduler = TrainingScheduler(trainer)
+    scheduler.run_background()
+    
+    # Пример инкрементного обучения
+    user_input = "Пример входного текста."
+    corrected_output = "Правильный выходной текст."
+    trainer.incremental_learning(user_input, corrected_output)
+    
+    
 '''
 Комментарии и предложения:
 Инкрементное обучение :
@@ -210,224 +433,3 @@ Mistral 7B (4-bit quantized) : Еще одна мощная модель с хо
 Phi-2 : Очень компактная модель, которая хорошо работает на CPU.
 '''
 
-
-import os
-import json
-import torch
-import schedule
-import time
-from typing import List, Dict
-from datetime import datetime
-import pynvml
-from datasets import load_dataset
-from gptqmodel import GPTQModel, QuantizeConfig
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForSeq2Seq
-)
-from safetensors.torch import load_file
-
-
-class GPTQTrainer:
-    """
-    Этот класс отвечает за инициализацию модели, подготовку данных и обучение модели.
-    """
-    def __init__(self, config: dict):
-        self.config = config
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = None
-        self.tokenizer = None
-        self._init_model()
-        self.experience_replay_buffer = []  # Буфер для Experience Replay
-    
-    def _init_model(self):
-        """Инициализация модели с GPTQ-квантованием"""
-        if self.model is None:
-            checkpoint_path = self.config["model_name"]
-            try:
-                self.model = GPTQModel.load(checkpoint_path, quant_config)  # Загрузка модели из весов
-                self.model.tie_weights()
-                print("Model layers:", self.model.config.architectures)
-            except Exception as e:
-                print(f"Ошибка загрузки модели: {e}")
-                raise
-        
-        # Загрузка токенизатора
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.config["model_name"],
-            use_fast=True
-        )
-        if self.tokenizer is None:
-            raise RuntimeError("Ошибка: токенизатор не был загружен! Проверьте путь к модели.")
-    
-    def _load_errors(self) -> List[Dict]:
-        """Загрузка и валидация ошибок"""
-        try:
-            with open(self.config["errors_path"], "r", encoding="utf-8") as f:
-                errors = json.load(f)
-                return [e for e in errors if self._validate_sample(e)]
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-    
-    def _validate_sample(self, sample: Dict) -> bool:
-        """Проверка корректности примера"""
-        required_keys = {"input", "output", "corrected"}
-        return all(key in sample for key in required_keys)
-    
-    def _prepare_dataset(self):
-        """Подготовка данных для обучения"""
-        errors = self._load_errors()
-        return [self._format_example(e) for e in errors]
-    
-    def _format_example(self, example: Dict) -> Dict:
-        """Форматирование примера для датасета"""
-        return {
-            "input_ids": self.tokenizer.encode(example['input'], truncation=True, padding=True),
-            "labels": self.tokenizer.encode(example['corrected'], truncation=True, padding=True)
-        }
-    
-    def train(self):
-        """Основной метод обучения"""
-        if self._check_vram() > self.config["max_vram"]:
-            raise MemoryError("Not enough VRAM for training")
-        
-        dataset = self._prepare_dataset()
-        if len(dataset) < self.config["min_samples"]:
-            return False
-        
-        training_args = TrainingArguments(
-            output_dir=self.config["output_dir"],
-            num_train_epochs=self.config["num_epochs"],
-            per_device_train_batch_size=self.config["batch_size"],
-            gradient_accumulation_steps=self.config["gradient_accumulation"],
-            learning_rate=self.config["learning_rate"],
-            fp16=True,
-            logging_steps=10,
-            optim="adamw_torch",
-            report_to="none",
-            gradient_checkpointing=True  # Добавляем gradient_checkpointing для экономии памяти
-        )
-        
-        trainer = Trainer(
-            model=self.model,
-            args=training_args,
-            train_dataset=dataset,
-            data_collator=DataCollatorForSeq2Seq(self.tokenizer, model=self.model)
-        )
-        
-        trainer.train()
-        self._save_model()
-        return True
-    
-    def _save_model(self):
-        """Сохранение модели"""
-        output_dir = os.path.join(
-            self.config["output_dir"],
-            f"model_{datetime.now().strftime('%Y%m%d_%H%M')}"
-        )
-        self.model.save_pretrained(output_dir)
-        self.tokenizer.save_pretrained(output_dir)
-    
-    def _check_vram(self) -> int:
-        """Проверка используемой VRAM"""
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        return info.used // 1024**2  # MB
-    
-    def incremental_learning(self, input_text: str, corrected_text: str):
-        """Инкрементное обучение на новых данных"""
-        new_data = [{"input": input_text, "corrected": corrected_text}]
-        self.experience_replay_buffer.extend(new_data)
-        
-        # Ограничиваем размер буфера
-        if len(self.experience_replay_buffer) > self.config.get("replay_buffer_size", 100):
-            self.experience_replay_buffer = self.experience_replay_buffer[-self.config["replay_buffer_size"]:]
-        
-        # Формируем датасет из буфера
-        dataset = [self._format_example(e) for e in self.experience_replay_buffer]
-        
-        training_args = TrainingArguments(
-            output_dir=self.config["output_dir"],
-            num_train_epochs=1,
-            per_device_train_batch_size=1,
-            gradient_accumulation_steps=1,
-            learning_rate=self.config["learning_rate"] / 10,  # Меньший шаг обучения
-            fp16=True,
-            logging_steps=1,
-            optim="adamw_torch",
-            report_to="none",
-            gradient_checkpointing=True  # Добавляем gradient_checkpointing для экономии памяти
-        )
-        
-        trainer = Trainer(
-            model=self.model,
-            args=training_args,
-            train_dataset=dataset,
-            data_collator=DataCollatorForSeq2Seq(self.tokenizer, model=self.model)
-        )
-        
-        trainer.train()
-        self._save_model()
-
-class TrainingScheduler:
-    def __init__(self, trainer: GPTQTrainer):
-        self.trainer = trainer
-        self._setup_schedule()
-    
-    def _setup_schedule(self):
-        """Настройка расписания"""
-        schedule.every().day.at("04:00").do(self._daily_training)
-        schedule.every(3).hours.do(self._check_for_errors)
-    
-    def _daily_training(self):
-        if self.trainer.train():
-            self._clean_old_models()
-    
-    def _check_for_errors(self):
-        if len(self.trainer._load_errors()) >= 5:
-            self.trainer.train()
-    
-    def _clean_old_models(self):
-        """Удаление старых моделей"""
-        models = sorted(os.listdir(self.trainer.config["output_dir"]))
-        for model in models[:-3]:  # Оставляем последние 3 модели
-            os.remove(os.path.join(self.trainer.config["output_dir"], model))
-    
-    def run_background(self):
-        """Запуск в фоновом режиме"""
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
-
-# Пример конфигурации
-DEFAULT_CONFIG = {
-    "model_name": r"models\llm\Qwen2.5-0.5B-Instruct-GPTQ-Int8",
-    "device": "cuda",
-    "torch_dtype": "auto",
-    "errors_path": "memory/memory_errors.json",
-    "output_dir": "./models/llm",
-    "num_epochs": 1,
-    "batch_size": 2,
-    "gradient_accumulation": 4,
-    "learning_rate": 3e-5,
-    "max_vram": 10000,  # 10GB
-    "min_samples": 5,
-    "replay_buffer_size": 100  # Размер буфера для Experience Replay
-}
-
-quant_config = QuantizeConfig(bits=8, group_size=128)
-
-# Инициализация и запуск
-if __name__ == "__main__":
-    trainer = GPTQTrainer(DEFAULT_CONFIG)
-    scheduler = TrainingScheduler(trainer)
-    scheduler.run_background()
-    
-    # Пример инкрементного обучения
-    user_input = "Пример входного текста."
-    corrected_output = "Правильный выходной текст."
-    trainer.incremental_learning(user_input, corrected_output)

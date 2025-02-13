@@ -1,254 +1,199 @@
-'''
+# my own code's here
 #from tools.train import GPTQTrainer, DEFAULT_CONFIG, TrainingScheduler
-import threading
+#import threading
 #from tools.sound import AudioManager, DEFAULT_VOICE_CONFIG
 #from tools.avatar import AvatarController, AvatarConfig
+#from tools.sql_memory import SQLMemory
+#from tools.langchain_memory import LanguageChain
+
+# Basic import
+import os
+import sys
+import logging
+import psutil
+
+# External libraries
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    BitsAndBytesConfig
+    BitsAndBytesConfig,
+    pipeline
 )
-from peft import PeftConfig, PeftModel
-import psutil
-import json
-import os
-import speech_recognition as sr
-#from gptqmodel import GPTQModel, QuantizeConfig
-'''
+from gptqmodel import GPTQModel, QuantizeConfig
+from datasets import load_dataset
 
-import sys
-#from PyQt5.QtWidgets import QApplication
-#from PyQt5.QtWidgets import QMainWindow
 import torch
-#from llama_cpp import Llama
-
-from tools.sql_memory import SQLMemory
-
-# Вывод информации о памяти GPU
-print(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB")
-print(f"GPU Memory Cached: {torch.cuda.memory_reserved() / 1024 ** 2:.2f} MB")
-
 
 # Инициализация компонентов
-'''
-trainer = GPTQTrainer(DEFAULT_CONFIG)  # Инициализация тренера для обучения GPTQ
-scheduler = TrainingScheduler(trainer)  # Планировщик для управления обучением
-audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
-recognizer = sr.Recognizer()  # Распознавание речи
-'''
-MODEL_NAME = 'deepseek-r1:1.5b'
+#trainer = GPTQTrainer(DEFAULT_CONFIG)  # Инициализация тренера для обучения GPTQ
+#scheduler = TrainingScheduler(trainer)  # Планировщик для управления обучением
+#audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Параметры
+MODEL_NAME = "models/llm/Qwen2.5-1.5B"
 
 
 class ChatBot:
     def __init__(self):
+        self.model_name = MODEL_NAME
+        self.quantized_model_id = f"{self.model_name}-4bit"
         self.model = None  # Модель для генерации текста
         self.tokenizer = None  # Токенизатор для обработки текста
-        
-        #self.memory = self.load_memory(MEMORY_FILE)  # Загрузка истории диалога
-        #self.error_memory = self.load_memory(ERRORS_FILE)  # Загрузка ошибок
-        #self.audio = audio  # Менеджер аудио
-        #self.use_audio = True  # Флаг для использования аудио
-        
         self.load_model()  # Загрузка модели и токенизатора
-        self.model_name = MODEL_NAME
+        
+    # os.makedirs(quantized_model_dir, exist_ok=True)
+    def get_wikitext2(self, tokenizer, nsamples, seqlen):
+        traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train").filter(
+            lambda x: len(x["text"]) >= seqlen)
+
+        return [tokenizer(example["text"]) for example in traindata.select(range(nsamples))]
+
+    @torch.no_grad()
+    def calculate_avg_ppl(self, model, tokenizer):
+        from gptqmodel.utils import Perplexity
+
+        ppl = Perplexity(
+            model=model,
+            tokenizer=tokenizer,
+            dataset_path="wikitext",
+            dataset_name="wikitext-2-raw-v1",
+            split="train",
+            text_column="text",
+        )
+
+        all = ppl.calculate(n_ctx=512, n_batch=512)
+
+        # average ppl
+        avg = sum(all) / len(all)
+
+        return avg
 
     def load_model(self):
-        """Загружает GPTQ-модель и токенизатор."""
-        try:
-            self.model_configure()
-        except Exception as e:
-            print(f"Ошибка загрузки модели: {str(e)}")
-            self.model = None
-            self.tokenizer = None
-
-    def model_configure(self):
-        pass
-        '''
-        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        print("Токенизатор успешно загружен.")
-        # Конфигурация квантования
-        quant_config = QuantizeConfig(
-            bits=4,  # Укажите нужное количество битов
-            group_size=128,
-            desc_act=True  # Можно настроить по необходимости
-        )
-        self.model = GPTQModel.from_quantized(
-            MODEL_NAME,
-            quantize_config=quant_config,
-            device="cuda" if torch.cuda.is_available() else "cpu"
-        )
-        self.model = torch.compile(self.model)
-        self.model.tie_weights()
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+        logging.info("Токенизатор успешно загружен.")
+        
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model.to(device)
-        print(f"Модель успешно загружена на: {device}")
-        '''
-
-    @staticmethod
-    def load_memory(file_path):
-        """Загружает память из файла."""
-        try:
-            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            return []
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"Ошибка загрузки памяти: {str(e)}")
-            return []
-    
-    def process_voice_input(self):
-        """Обрабатывает голосовой ввод пользователя."""
-        if not self.use_audio:
-            return input("Введите текст: ")  # Если аудио отключено, используем текстовый ввод
-
-        with sr.Microphone() as source:
+        
+        """Проверяем если квантизируемая модель уже существует"""
+        if os.path.exists(self.quantized_model_id):  # Проверяем, существует ли папка с квантизованной моделью
+            logging.info("Квантизованная модель найдена, загружаем...")
+            self.model = GPTQModel.from_quantized(self.quantized_model_id, device=device)
+        else:
+            """Загружаем или квантизирует модель."""
             try:
-                audio = recognizer.listen(source, timeout=5)
-                return recognizer.recognize_whisper(audio, language="russian")
-            except sr.WaitTimeoutError:
-                print("Голосовой ввод не распознан.")
-                return ""
+                traindataset = self.get_wikitext2(self.tokenizer, nsamples=256, seqlen=1024)
+                
+                quantize_config = QuantizeConfig(
+                    bits=4,  # Квантизация в 4 бита
+                    group_size=128,
+                    desc_act=True
+                )
+
+                # load un-quantized model, the model will always be force loaded into cpu
+                self.model = GPTQModel.load(self.model_name, quantize_config)
+                logging.info("basic модель успешно загружена.")
+
+                # Загружаем неквантизованную модель
+                model = GPTQModel.load(self.model_name, quantize_config)
+                logging.info("Неквантизированная модель загружена.")
+
+                # quantize model, the calibration_dataset should be list of dict whose keys can only be "input_ids" and "attention_mask"
+                # with value under torch.LongTensor type.
+                model.quantize(traindataset)
+                logging.info("Модель успешно квантизована.")
+
+                # Сохраняем квантизованную модель
+                model.save(self.quantized_model_id)
+                logging.info("Модель успешно сохранена.")
+
             except Exception as e:
-                print(f"Ошибка аудио: {str(e)}")
-                self.use_audio = False  # Отключаем аудио при ошибке
-                return input("Введите текст: ")  # Переходим на текстовый ввод
+                logging.error(f"Ошибка загрузки модели: {str(e)}")
+                self.model = None
+                self.tokenizer = None
+            
+        # Загружаем квантизованную модель в GPU
+        self.model = GPTQModel.load(self.quantized_model_id, device=device)
+        logging.info("Квантизованная модель успешно загружена после квантизации.")
 
-    def save_memory(self, data, file_path):
-        """Сохраняет память в файл."""
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Ошибка сохранения памяти: {str(e)}")
-
-    def format_context(self, messages):
-        """Формирует контекст из последних сообщений."""
-        context = system_prompt
-        for msg in messages[-MAX_HISTORY:]:
-            context += f"\n<|{msg['role']}|>{msg['content']}</s>"
-        return context + "\n<|assistant|>"
+        #self.model = torch.compile(self.model)  # Оптимизация модели
+        #logging.info(f"Модель загружена и оптимизирована на {device}.")
 
     def generate_response(self, context):
         """Генерирует ответ модели."""
-        input_ids = self.tokenizer.encode(context, return_tensors="pt").to("cuda")
-        attention_mask = torch.ones_like(input_ids).to("cuda")
-        output = self.model.generate(
-            input_ids,
-            max_length=3072,
-            temperature=0.7,
-            do_sample=True,
-            top_p=0.95,
-            top_k=50,
-            min_length=20,
-            repetition_penalty=1.2,
-            attention_mask=attention_mask
-        )
-        return self.tokenizer.decode(output[0], skip_special_tokens=True)
+        if self.model is None:
+            return "Ошибка: Модель не загружена."
 
-    def handle_command(self, command):
-        """Обрабатывает команды пользователя."""
-        if command == "стоп":
-            self.save_memory(self.memory, MEMORY_FILE)
-            return True
-        elif command == "исправь":
-            self.error_memory.extend(self.memory[-2:])
-            self.save_memory(self.error_memory, ERRORS_FILE)
-        elif command == "перезагрузка":
-            self.memory = []
-        elif command == "сохранить":
-            self.save_memory(self.memory, MEMORY_FILE)
-        return False
-
-    def incremental_learning(self, new_data):
-        """Осуществляет инкрементальное обучение модели на новом наборе данных."""
         try:
-            #trainer.update_model_with_new_data(new_data)
-            print("Модель успешно обновлена!")
-        except Exception as e:
-            print(f"Ошибка при инкрементальном обучении: {str(e)}")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            tokenized_test = self.tokenizer.encode(context)
+            logging.info(f"Токенизированный ввод (без батчинга): {tokenized_test}")
 
-#class MainWindow(QMainWindow):
-class MainWindow():
-    def __init__(self):
-        super().__init__()
-        '''
-        # Конфигурация для аватара
-        self.avatar_config = AvatarConfig(
-            model_url="https://models.silero.ai/models/tts/ru/v4_ru.pt",
-            viseme_map={
-                'sil': 0.0, 'PP': 0.3, 'FF': 0.2,
-                'TH': 0.4, 'DD': 0.35, 'kk': 0.5
-            }
-        )
-        self.use_avatar = True  # Флаг для использования аватара
-        try:
-            print(type(self.avatar_config))  # Проверка типа конфигурации
-            self.avatar = AvatarController(self.avatar_config)  # Инициализация аватара
-            self.setCentralWidget(self.avatar.container)  # Установка аватара в главное окно
-        except Exception as e:
-            print(f"Ошибка загрузки аватара: {str(e)}")
-            self.use_avatar = False  # Отключаем аватар при ошибке
-            self.avatar = None
-        '''
+            # Создаём input_ids + attention_mask
+            inputs = self.tokenizer(context, return_tensors="pt", padding=True, truncation=True).to(device)
 
-if __name__ == "__main__":    
-    sql_memory = SQLMemory() # Инициализация sql памяти
-    sql_memory.model_name = MODEL_NAME
-    conversations = sql_memory.fetch_conversations()
-    sql_memory.create_vector_db(conversations=conversations)
-    sql_memory.start_chat_loop()
-    
-    #chat_bot = ChatBot()  # Инициализация чат-бота
-    #app = QApplication(sys.argv)
-    #chat = MainWindow()
-    #window.show()
-    #window.start_chat_loop()
-    #sys.exit(app.exec_())
+            # Проверка на пустые input_ids или input_ids с нулями
+            if inputs["input_ids"].numel() == 0:
+                logging.error("Ошибка: `input_ids` пустой!")
+                return "Ошибка: Невозможно обработать пустой ввод."
+
+            if torch.any(inputs["input_ids"] == 0):
+                logging.warning("Предупреждение: `input_ids` содержит запрещённые значения (0). Заменяем их на `pad_token_id`.")
+                inputs["input_ids"][inputs["input_ids"] == 0] = self.tokenizer.pad_token_id
+
+            # Указываем pad_token_id, чтобы избежать ошибок
+            if self.tokenizer.pad_token_id is None:
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+                
+            logging.info(f"Отладка input_ids перед генерацией: {inputs['input_ids']}")
+            logging.info(f"Форма input_ids: {inputs['input_ids'].shape}")
+            
+            hidden_states = self.model(inputs["input_ids"])
+            logging.info(f"Выход скрытых слоёв: {hidden_states}")
+
+            output = self.model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],  # ✅ Теперь передаём attention mask
+                max_new_tokens=64,  # ✅ Ограничиваем число токенов (фикс для CUDA)
+                temperature=0.7,
+                do_sample=True,
+                top_p=0.95,
+                top_k=50,
+                repetition_penalty=1.2,
+                pad_token_id=self.tokenizer.pad_token_id  # ✅ Добавляем pad_token_id
+            )
+
+            return self.tokenizer.decode(output[0], skip_special_tokens=True)
+
+        except Exception as e:
+            logging.error(f"Ошибка при генерации ответа: {str(e)}")
+            return "Извините, произошла ошибка."
+
+
+    def start_chat_loop(self):
+        """Основной цикл диалога в терминале."""
+        print("Чат-бот запущен. Введите сообщение или 'exit' для выхода.")
+
+        while True:
+            user_input = input("Вы: ").strip()
+            if user_input.lower() in ["exit", "quit"]:
+                print("Диалог завершен.")
+                break
+
+            response = self.generate_response(user_input)
+            print(f"Бот: {response}")
+
+
+if __name__ == "__main__":
+    # Инициализация чат-бота
+    chat_bot = ChatBot()
+    chat_bot.start_chat_loop()
     
 
 '''
-user_input = self.bot.process_voice_input()  # Получение голосового ввода
-if not user_input:
-    continue
-if self.bot.handle_command(user_input.lower()):  # Обработка команд
-    break
-self.bot.memory.append({"role": "user", "content": user_input})  # Добавление ввода в память
-context = self.bot.format_context(self.bot.memory)  # Формирование контекста
-response = self.bot.generate_response(context)  # Генерация ответа
-self.bot.memory.append({"role": "assistant", "content": response})  # Добавление ответа в память
-
-# Анимация речи аватара (если аватар доступен)
-if self.use_avatar and self.avatar:
-    try:
-        self.avatar.animate_speech(response)  # Анимация речи аватара
-    except Exception as e:
-        print(f"Ошибка анимации аватара: {str(e)}")
-        self.use_avatar = False  # Отключаем аватар при ошибке
-
-# Воспроизведение ответа (если аудио доступно)
-if self.bot.use_audio:
-    try:
-        self.bot.audio.speak(response)  # Воспроизведение ответа
-    except Exception as e:
-        print(f"Ошибка воспроизведения аудио: {str(e)}")
-        self.bot.use_audio = False  # Отключаем аудио при ошибке
-
-print(f"\nБот: {response}\n")
-if len(self.bot.memory) > MAX_HISTORY:  # Ограничение истории
-    self.bot.memory = self.bot.memory[-MAX_HISTORY:]
-
-# Инкрементальное обучение
-self.bot.incremental_learning([{"input": user_input, "output": response}])
-
-except KeyboardInterrupt:
-print("\nЗавершение работы...")
-
-finally:
-self.bot.save_memory(self.bot.memory, MEMORY_FILE)  # Сохранение памяти
-self.bot.save_memory(self.bot.error_memory, ERRORS_FILE)  # Сохранение ошибок
-trainer.train()  # Запуск обучения
-
-
 Комментарии и предложения:
 Обработка ошибок :
 Добавьте более детальную обработку ошибок, особенно в части голосового ввода и 
@@ -264,18 +209,8 @@ trainer.train()  # Запуск обучения
 Реализуйте функцию incremental_learning, которая позволит обучать модель на небольших 
 объемах данных (например, одном предложении), что делает процесс более легковесным 1.
 Интеграция компонентов :
-Убедитесь, что все компоненты программы интегрированы правильно и взаимодействуют между 
-собой без проблем 1.
 Используйте многопоточность для выполнения задач, таких как фоновое обучение, чтобы не 
 нагружать основной поток выполнения программы 1.
-Расширение функциональности :
-Рассмотрите возможность добавления новых функций, таких как управление освещением, 
-реализация системы жестов или интеграция Faceware-подобной технологии 1.
-Используйте WebAssembly для выполнения сложных вычислений на стороне клиента, что 
-позволит ускорить обработку данных 7.
-Да, конечно, присылайте код! Я помогу вам его проанализировать, улучшить и предложу 
-идеи для дальнейшего развития. Если что-то в вашем подходе можно оптимизировать или 
-исправить, я обязательно укажу на это и предложу альтернативные решения.
 
 Дополнительные рекомендации:
 Использование LoRA для адаптации модели :
@@ -289,40 +224,12 @@ WebAssembly для сложных вычислений :
 Если вы хотите ускорить обработку данных на стороне клиента, рассмотрите возможность 
 использования WebAssembly (WASM).
 Управление памятью GPU :
-Используйте torch.cuda.empty_cache() для очистки памяти GPU после завершения операций, 
-чтобы освободить ресурсы для других задач.
-Добавление новых функций :
-Рассмотрите возможность добавления новых функций, таких как управление освещением, система 
-жестов или интеграция Faceware-подобной технологии.
 
-Обучение модели в процессе общения — это действительно интересная задача. Однако 
-стоит учитывать, что обучение нейросетей "на лету" (online learning) требует значительных 
-вычислительных ресурсов, особенно если модель большая. Для локального использования с 
-ограниченными ресурсами можно рассмотреть следующие подходы:
-Fine-tuning через LoRA (Low-Rank Adaptation) : Это метод, который позволяет адаптировать 
-модель с минимальными затратами ресурсов. Вместо полного пересчета весов модели, LoRA 
-изменяет только небольшую часть параметров.
-Использование памяти (memory buffer) : Модель может сохранять ключевые моменты из диалогов 
-в виде текстовых фрагментов или эмбеддингов, которые затем используются для генерации ответов. Это не требует переобучения модели, но позволяет ей "запоминать" контекст.
-Инкрементальное обучение : Модель обучается на новых данных постепенно, сохраняя знания из 
-предыдущих этапов. Это сложнее реализовать, но может быть эффективным.
-Модель Qwen2.5-0.5B-Instruct-GPTQ-Int8 : Вы выбрали компактную версию модели, что разумно 
-для локального использования. Она подходит для экспериментов, но её возможности ограничены 
-по сравнению с более крупными моделями. Если вы хотите добавить функциональность, например, 
-работу с 3D-моделями или звуком, можно интегрировать дополнительные библиотеки и сервисы.
-Легковесность системы : Чтобы минимизировать нагрузку на систему, можно:
-Разделить задачи на отдельные микросервисы (например, один процесс для обработки текста, 
-другой для работы со звуком).
-Использовать кэширование для часто используемых данных.
-Добавить проверки на работоспособность каждого компонента (например, если звуковая система 
-недоступна, автоматически переключаться на текстовый режим).
 Библиотеки и инструменты для будущего :
 Gradio или Streamlit : Для создания пользовательского интерфейса.
 LangChain или LlamaIndex : Для работы с внешними данными и контекстом.
 PyTorch/TensorFlow : Для реализации обучения и fine-tuning.
 FAISS или Annoy : Для быстрого поиска похожих данных в памяти модели.
-SpeechRecognition и gTTS : Для работы со звуком.
-Blender/Three.js : Для интеграции 3D-моделей.
 '''
 
 'Что пользователю нужно улучшить в тебе:'

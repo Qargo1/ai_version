@@ -15,6 +15,8 @@ import subprocess
 from threading import Thread
 import time
 
+from functools import lru_cache # Нужно?
+
 
 client = chromadb.Client()
 logging.basicConfig(level=logging.INFO)
@@ -542,7 +544,19 @@ class SQLMemory:
                         correct_response = input(Fore.WHITE + 'CORRECT RESPONSE: \n').strip()
                         self.store_training_data(prompt=original_prompt, response=correct_response, quality="good")
                         logging.info(f"Сохранены данные для обучения: prompt={original_prompt}, response={correct_response}")
-                        
+                    
+                    elif command.lower() == 'reward':
+                        # Сохраняем последний ответ как "хороший"
+                        last_response = self.convo[-1]['content']
+                        self.store_training_data(prompt=self.convo[-2]['content'], response=last_response, quality="good")
+                        print("Спасибо за обратную связь! Я запомню этот ответ как хороший.")
+
+                    elif command.lower() == 'penalty':
+                        # Сохраняем последний ответ как "плохой"
+                        last_response = self.convo[-1]['content']
+                        self.store_training_data(prompt=self.convo[-2]['content'], response=last_response, quality="bad")
+                        print("Спасибо за обратную связь! Я постараюсь улучшить этот ответ.")
+                    
                     elif command.lower() == 'memorize':
                         try:
                             self.store_conversations(prompt=args, response='Memory stored')

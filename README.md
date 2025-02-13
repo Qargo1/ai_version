@@ -51,46 +51,19 @@ TEMPLATE """{% for message in messages %}{{message['role']}}: {{message['content
 # Build model package
 ollama create zephyr -f ./zephyr-ollama/Modelfile
 
-# Possible requirements
-transformers
-peft
-bitsandbytes
-pynvml
-schedule
-PyQt5
-PyQtWebEngine
-speechrecognition
-pyaudio
-numpy
-dataclasses
-urllib3
-resource
-psutil
-openai-whisper
-setuptools-rust
-soundfile
-gptqmodel
-wheel
-gekko
-pandas
-wget
-silero
-scipy
-torchaudio
-librosa
-torchvision
-noisereduce
-vosk
-keyboard
-TTS
-deepspeech
-coqui-stt-model-manager
-python-osc
-future_fstrings
-ollama
-chromadb
-psycopg
-ast
-
 # Implementing cuda and torch by running
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Installing GPTQModel
+https://github.com/ModelCloud/GPTQModel
+
+# triton?
+git clone https://github.com/triton-lang/triton.git
+cd triton
+
+python -m venv .venv --prompt triton
+source .venv/bin/activate
+
+pip install ninja cmake wheel pybind11 # build-time dependencies
+pip install -e python
+

@@ -1,4 +1,4 @@
 ollama
 chromadb
 psycopg
-PyQt5
+transformers
