@@ -119,8 +119,8 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
 # pip install gradio - not sure i need it
 
 ## Some unused libraries
-# Installing GPTQModel (Linux only, not in Use)
+# Installing GPTQModel (Linux only, not in Use) - потребуют переписывания части кода и специфического окружения.
 https://github.com/ModelCloud/GPTQModel
-# pip install vllm (Linux only, not in Use)
-# pip install optimum[onnxruntime] (Not implemented)
+# pip install vllm (Linux only, not in Use) - должен ускорить работу, потребуют переписывания части кода и специфического окружения.
+# pip install optimum[onnxruntime] (Not implemented) - должен быть совместим с моим кодом
 # pip install optimum[onnxruntime-gpu] optimum[exporters] (Not implemented)

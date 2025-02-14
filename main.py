@@ -6,33 +6,10 @@
 #from tools.sql_memory import SQLMemory
 #from tools.langchain_memory import LanguageChain
 
-'''
-import torch
-from optimum.onnxruntime import ORTModelForSequenceClassification
-from transformers import (
-    AutoTokenizer, 
-    pipeline
-)
-from functools import (
-    lru_cache
-)
-from langchain.cache import InMemoryCache
-
-from tqdm import tqdm
-from colorama import Fore
-
-from dotenv import load_dotenv
-import gradio as gr
-
+# Оптимизация инференса
 from optimum.onnxruntime import ORTModelForSequenceClassification
 
-Инициализация компонентов
-trainer = GPTQTrainer(DEFAULT_CONFIG)  # Инициализация тренера для обучения GPTQ
-scheduler = TrainingScheduler(trainer)  # Планировщик для управления обучением
-audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
-
-mindnlp.
-'''
+from transformers import pipeline
 
 # Basic import
 import logging
@@ -79,22 +56,23 @@ MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
 MAX_HISTORY_LENGTH = 5  # Ограничиваем историю диалога
 
 GENERATION_CONFIG = {
-    "bos_token_id": 1,
-    "eos_token_id": 111,
-    "pad_token_id": 1111,
-    "temperature": 0.6, 
+    "temperature": 0.5, 
     "do_sample": True, 
     "early_stopping": True, 
     "num_return_sequences": 1, 
-    "max_new_tokens": 512,
+    "max_new_tokens": 2048,
     "use_cache": True,  # Модель может использовать кэш для ускорения генерации
-    "repetition_penalty": 1.7,
-    "top_p": 0.95
+    "repetition_penalty": 1.3,
+    "top_p": 0.96
 }
 
 SYSTEM_PROMPT = (
-    "Every response should start with '<think>' to ensure the model engages in thorough reasoning."
-    "Please provide a thorough and well-reasoned response."
+    "You're a helpful AI assistant. Always follow these rules:"
+    "1. Start response with <think>analysis</think>"
+    "2. Please provide a thorough and well-reasoned response.:"
+    "Example:\n"
+    "<think>User asked about... I need to think...</think>\n"
+    "**Answer:** Full answer here..."
 )
 
 
@@ -118,12 +96,11 @@ class ChatBot:
         self.system_prompt = SYSTEM_PROMPT
         self.streamer = None
         
-        self.chat_history = []  # Храним историю сообщений
-        self.chat_history.append([{'role': 'system', 'content': self.system_prompt}])
-        
         self.initialize_tokenizer()
         self.initialize_model()
         self.initialize_streamer()
+        
+        self.model.eval()  # Переводим модель в режим оценки
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)  # Перемещаем модель на GPU, если доступно
@@ -146,7 +123,8 @@ class ChatBot:
         """
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto"  # Автоматическое распределение по GPU/CPU
             )
         #self.model.to(self.device) - doesn't work
         
@@ -155,14 +133,17 @@ class ChatBot:
                                         skip_prompt=True, 
                                         skip_special_tokens=True)
     
-    def build_input_from_chat_history(self, msg: str):
-        """Формируем историю сообщений в виде строки для модели."""
-        self.chat_history.append({'role': 'user', 'content': msg})
-        return f"\n{self.chat_history}"
+    def calculate_token_length(self, text):
+        return len(self.tokenizer.encode(text))
+    
+    def adjust_parameters_based_on_context(self):
+        if "креатив" in self.system_prompt[-1]['content']:
+            return {"temperature": 0.9, "top_k": 50}
+        return {"temperature": 0.7, "top_k": 30}
 
     async def predict(self, user_input):
         """Асинхронная генерация ответа с streamer."""
-        prompt = self.build_input_from_chat_history(user_input)
+        prompt = f"\n{self.system_prompt} + {user_input}"
 
         # Токенизируем ввод (ФИКС ошибки attention_mask)
         inputs = self.tokenizer(
@@ -173,42 +154,29 @@ class ChatBot:
             max_length=1024
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}  # Перенос на cuda
+        
+        generation_kwargs = dict(
+            inputs,
+            streamer=self.streamer,
+            max_new_tokens=GENERATION_CONFIG['max_new_tokens'],  # Увеличиваем лимит токенов
+            temperature=GENERATION_CONFIG['temperature'],     # Больше креативности (0-1)
+            top_p=GENERATION_CONFIG['top_p'],           # Контроль разнообразия
+            repetition_penalty=GENERATION_CONFIG['repetition_penalty'],  # Предотвращение повторов
+            do_sample=GENERATION_CONFIG['do_sample'],      # Включаем стохастичность
+            eos_token_id=self.tokenizer.eos_token_id,  # Стоп-токен
+            pad_token_id=self.tokenizer.pad_token_id
+        )
 
         # Запускаем генерацию в отдельном потоке
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        thread = Thread(target=self.model.generate, kwargs={"streamer": streamer, **inputs})
+        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
         thread.start()
 
         response = ""
-        async for new_token in self.stream_response(streamer, response):
+        async for new_token in self.stream_response(self.streamer, response):
             print(new_token[len(response):], end="", flush=True)
             response = new_token
-
+            
         return response
-        
-        '''
-        Version 1.0.0
-        messages = self.build_input_from_chat_history(history, message)
-        
-        # Токенизируем входные данные
-        input_ids = self.tokenizer(
-            "\n".join([msg['content'] for msg in messages]),
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=1024
-        ).input_ids.to(self.device)  # Перемещаем тензоры на GPU
-
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        thread = Thread(target=self.model.generate, args=(input_ids,), kwargs={"streamer": streamer})
-        thread.start()
-
-        response = ""
-        async for new_token in self.stream_response(streamer, response):
-            print(new_token[len(response):], end="", flush=True)
-            response = new_token
-        return response
-        '''
     
     async def stream_response(self, streamer, response):
         """Асинхронный поток вывода ответа в реальном времени."""
@@ -307,3 +275,11 @@ FAISS или Annoy : Для быстрого поиска похожих дан�
 'Должен быть явный хештег "language_mistakes" отвечающий за неправильный/некорректный/неподходящий русский и следовательно - как было бы правильно сказать это по русски.'
 'Хештек на ошибки, для общих ошибок.'
 'Звук грома и молнию - показать злость'
+
+'''
+Для дальнейшего улучшения рекомендую:
+Добавить проверку токенов в реальном времени
+Реализовать механизм перефразирования длинных ответов
+Добавить эмоциональную окраску ответов через специальные токены
+Внедрить систему приоритетов для разных типов запросов
+'''
