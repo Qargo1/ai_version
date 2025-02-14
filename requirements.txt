@@ -2,3 +2,6 @@ ollama
 chromadb
 psycopg
 transformers
+vllm
+langchain
+resource

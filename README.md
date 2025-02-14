@@ -54,16 +54,16 @@ ollama create zephyr -f ./zephyr-ollama/Modelfile
 # Implementing cuda and torch by running
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# Installing GPTQModel
+# Installing GPTQModel (Linux only, not in Use)
 https://github.com/ModelCloud/GPTQModel
+# pip install vllm (Linux only, not in Use)
 
-# triton?
-git clone https://github.com/triton-lang/triton.git
-cd triton
+# for CPU only:
+pip3 install torch torchvision torchaudio
 
-python -m venv .venv --prompt triton
-source .venv/bin/activate
+# for GPU:
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
++
+CUDA 12.4
 
-pip install ninja cmake wheel pybind11 # build-time dependencies
-pip install -e python
-
+# pip install -U langchain-community

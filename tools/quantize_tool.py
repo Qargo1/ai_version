@@ -7,138 +7,189 @@
 #from tools.langchain_memory import LanguageChain
 
 # Basic import
+#import os
+#import sys
 import logging
+import psutil
 
 # External libraries
-import torch
 from transformers import (
-    AutoTokenizer, 
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
     pipeline
 )
-from functools import (
-    lru_cache
-)
-#from langchain.cache import InMemoryCache
+from gptqmodel import GPTQModel, QuantizeConfig
+from datasets import load_dataset
 
-import asyncio
-from tqdm import tqdm
-from colorama import Fore
-
-
-"""
-Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent endless repetitions or incoherent outputs.
-Avoid adding a system prompt; all instructions should be contained within the user prompt.
-To ensure that the model engages in thorough reasoning, we recommend enforcing the model to initiate its response with "<think>\n" at the beginning of every output.
-"""
+import torch
 
 # Инициализация компонентов
 #trainer = GPTQTrainer(DEFAULT_CONFIG)  # Инициализация тренера для обучения GPTQ
 #scheduler = TrainingScheduler(trainer)  # Планировщик для управления обучением
 #audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
 
-# Параметры
-MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
-
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Параметры модели
+# Параметры
 MODEL_NAME = "models/llm/Qwen2.5-1.5B"
 
 
 class ChatBot:
-    def __init__(self, model_name):
-        """
-        Инициализация чат-бота.
-        :param model_name: Название или путь к модели.
-        """
+    def __init__(self):
         self.model_name = MODEL_NAME
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.initialize_model()
+        self.quantized_model_id = f"{self.model_name}-4bit"
+        self.model = None  # Модель для генерации текста
+        self.tokenizer = None  # Токенизатор для обработки текста
+        self.load_model()  # Загрузка модели и токенизатора
+        
+    # os.makedirs(quantized_model_dir, exist_ok=True)
+    def get_wikitext2(self, tokenizer, nsamples, seqlen):
+        traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train").filter(
+            lambda x: len(x["text"]) >= seqlen)
 
-    def initialize_model(self):
-        """
-        Инициализация модели с использованием transformers.
-        """
-        try:
-            # Создаем пайплайн для генерации текста
-            self.generator = pipeline("text-generation", model=self.model_name)
-            logging.info("Модель успешно загружена с помощью transformers.")
-        except Exception as e:
-            logging.error(f"Ошибка загрузки модели: {str(e)}")
-            self.generator = None
+        return [tokenizer(example["text"]) for example in traindata.select(range(nsamples))]
 
-    def preprocess_prompt(self, prompt):
-        """
-        Предварительная обработка входного запроса для улучшения качества ответа.
-        :param prompt: Входной запрос пользователя.
-        :return: Обработанный запрос.
-        """
-        # Добавляем инструкции для модели
-        processed_prompt = (
-            f"<think>\n{prompt}\n</think>"
-            "Please provide a thorough and well-reasoned response."
+    @torch.no_grad()
+    def calculate_avg_ppl(self, model, tokenizer):
+        from gptqmodel.utils import Perplexity
+
+        ppl = Perplexity(
+            model=model,
+            tokenizer=tokenizer,
+            dataset_path="wikitext",
+            dataset_name="wikitext-2-raw-v1",
+            split="train",
+            text_column="text",
         )
-        return processed_prompt
 
-    @lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
-    def generate_response(self, prompt, max_new_tokens=512, temperature=0.6, top_p=0.95):
-        """
-        Генерация ответа с использованием transformers.
-        :param prompt: Входной запрос пользователя.
-        :param max_length: Максимальная длина ответа.
-        :param temperature: Температура для генерации.
-        :param top_p: Параметр nucleus sampling (top-p).
-        :return: Сгенерированный текст.
-        """
-        try:
-            if not self.generator:
-                raise ValueError("Модель не загружена!")
+        all = ppl.calculate(n_ctx=512, n_batch=512)
+
+        # average ppl
+        avg = sum(all) / len(all)
+
+        return avg
+
+    def load_model(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+        logging.info("Токенизатор успешно загружен.")
+        
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        """Проверяем если квантизируемая модель уже существует"""
+        if os.path.exists(self.quantized_model_id):  # Проверяем, существует ли папка с квантизованной моделью
+            logging.info("Квантизованная модель найдена, загружаем...")
+            self.model = GPTQModel.from_quantized(self.quantized_model_id, device=device)
+        else:
+            """Загружаем или квантизирует модель."""
+            try:
+                traindataset = self.get_wikitext2(self.tokenizer, nsamples=256, seqlen=1024)
+                
+                quantize_config = QuantizeConfig(
+                    bits=4,  # Квантизация в 4 бита
+                    group_size=128,
+                    desc_act=True
+                )
+
+                # load un-quantized model, the model will always be force loaded into cpu
+                self.model = GPTQModel.load(self.model_name, quantize_config)
+                logging.info("basic модель успешно загружена.")
+
+                # Загружаем неквантизованную модель
+                model = GPTQModel.load(self.model_name, quantize_config)
+                logging.info("Неквантизированная модель загружена.")
+
+                # quantize model, the calibration_dataset should be list of dict whose keys can only be "input_ids" and "attention_mask"
+                # with value under torch.LongTensor type.
+                model.quantize(traindataset)
+                logging.info("Модель успешно квантизована.")
+
+                # Сохраняем квантизованную модель
+                model.save(self.quantized_model_id)
+                logging.info("Модель успешно сохранена.")
+
+            except Exception as e:
+                logging.error(f"Ошибка загрузки модели: {str(e)}")
+                self.model = None
+                self.tokenizer = None
             
-            # Генерация ответа
-            response = self.generator(
-                prompt,
-                max_new_tokens = max_new_tokens,
-                truncation=True,
-                temperature=temperature,
-                top_p=top_p,
-                do_sample=True
+        # Загружаем квантизованную модель в GPU
+        self.model = GPTQModel.load(self.quantized_model_id, device=device)
+        logging.info("Квантизованная модель успешно загружена после квантизации.")
+
+        #self.model = torch.compile(self.model)  # Оптимизация модели
+        #logging.info(f"Модель загружена и оптимизирована на {device}.")
+
+    def generate_response(self, context):
+        """Генерирует ответ модели."""
+        if self.model is None:
+            return "Ошибка: Модель не загружена."
+
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            tokenized_test = self.tokenizer.encode(context)
+            logging.info(f"Токенизированный ввод (без батчинга): {tokenized_test}")
+
+            # Создаём input_ids + attention_mask
+            inputs = self.tokenizer(context, return_tensors="pt", padding=True, truncation=True).to(device)
+
+            # Проверка на пустые input_ids или input_ids с нулями
+            if inputs["input_ids"].numel() == 0:
+                logging.error("Ошибка: `input_ids` пустой!")
+                return "Ошибка: Невозможно обработать пустой ввод."
+
+            if torch.any(inputs["input_ids"] == 0):
+                logging.warning("Предупреждение: `input_ids` содержит запрещённые значения (0). Заменяем их на `pad_token_id`.")
+                inputs["input_ids"][inputs["input_ids"] == 0] = self.tokenizer.pad_token_id
+
+            # Указываем pad_token_id, чтобы избежать ошибок
+            if self.tokenizer.pad_token_id is None:
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+                
+            logging.info(f"Отладка input_ids перед генерацией: {inputs['input_ids']}")
+            logging.info(f"Форма input_ids: {inputs['input_ids'].shape}")
+            
+            hidden_states = self.model(inputs["input_ids"])
+            logging.info(f"Выход скрытых слоёв: {hidden_states}")
+
+            output = self.model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],  # ✅ Теперь передаём attention mask
+                max_new_tokens=64,  # ✅ Ограничиваем число токенов (фикс для CUDA)
+                temperature=0.7,
+                do_sample=True,
+                top_p=0.95,
+                top_k=50,
+                repetition_penalty=1.2,
+                pad_token_id=self.tokenizer.pad_token_id  # ✅ Добавляем pad_token_id
             )
-            return response[0]["generated_text"].strip()
+
+            return self.tokenizer.decode(output[0], skip_special_tokens=True)
+
         except Exception as e:
             logging.error(f"Ошибка при генерации ответа: {str(e)}")
             return "Извините, произошла ошибка."
 
+
     def start_chat_loop(self):
-        """
-        Основной цикл диалога.
-        """
-        print("Диалог начат...")
+        """Основной цикл диалога в терминале."""
+        print("Чат-бот запущен. Введите сообщение или 'exit' для выхода.")
+
         while True:
-            try:
-                user_input = input(Fore.WHITE + "USER: ").strip()
-                if user_input.lower() in ["exit", "quit"]:
-                    print("Диалог завершен.")
-                    break
-
-                # Предварительная обработка запроса (можно закомментировать)
-                processed_input = self.preprocess_prompt(user_input)
-
-                # Генерация ответа
-                response = self.generate_response(user_input)
-                print(Fore.LIGHTGREEN_EX + f"BOT: {response}")
-            except KeyboardInterrupt:
-                print("\nДиалог прерван пользователем.")
+            user_input = input("Вы: ").strip()
+            if user_input.lower() in ["exit", "quit"]:
+                print("Диалог завершен.")
                 break
-            except Exception as e:
-                logging.error(f"Ошибка в диалоге: {str(e)}")
-                print("Произошла ошибка. Попробуйте снова.")
+
+            response = self.generate_response(user_input)
+            print(f"Бот: {response}")
+
 
 if __name__ == "__main__":
     # Инициализация чат-бота
-    chat_bot = ChatBot(MODEL_NAME)
-
-    # Запуск основного цикла диалога
+    chat_bot = ChatBot()
     chat_bot.start_chat_loop()
     
 
