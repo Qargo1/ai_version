@@ -6,9 +6,6 @@
 #from tools.sql_memory import SQLMemory
 #from tools.langchain_memory import LanguageChain
 
-# Basic import
-import logging
-
 '''
 import torch
 from optimum.onnxruntime import ORTModelForSequenceClassification
@@ -21,12 +18,20 @@ from functools import (
 )
 from langchain.cache import InMemoryCache
 
-import asyncio
 from tqdm import tqdm
 from colorama import Fore
 
 from dotenv import load_dotenv
 import gradio as gr
+
+from optimum.onnxruntime import ORTModelForSequenceClassification
+
+Инициализация компонентов
+trainer = GPTQTrainer(DEFAULT_CONFIG)  # Инициализация тренера для обучения GPTQ
+scheduler = TrainingScheduler(trainer)  # Планировщик для управления обучением
+audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
+
+mindnlp.
 '''
 
 # Basic import
@@ -34,38 +39,36 @@ import logging
 import re
 import warnings
 from typing import List
+import asyncio
 
 # External libraries
 import torch
 
-import mindspore
-
 # Check that little boy
-from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
-from mindnlp.transformers import TextIteratorStreamer
+from transformers import (
+    AutoModelForCausalLM, 
+    AutoTokenizer, 
+    TextIteratorStreamer,
+    StoppingCriteria,
+    StoppingCriteriaList
+)
 
 from threading import Thread
-
-#from optimum.onnxruntime import ORTModelForSequenceClassification
-
 from functools import (
     lru_cache
 )
 
-"""
-Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent endless repetitions or incoherent outputs.
-Avoid adding a system prompt; all instructions should be contained within the user prompt.
-To ensure that the model engages in thorough reasoning, we recommend enforcing the model to initiate its response with "<think>\n" at the beginning of every output.
-"""
 
-# Инициализация компонентов
-#trainer = GPTQTrainer(DEFAULT_CONFIG)  # Инициализация тренера для обучения GPTQ
-#scheduler = TrainingScheduler(trainer)  # Планировщик для управления обучением
-#audio = AudioManager(DEFAULT_VOICE_CONFIG)  # Менеджер аудио для воспроизведения речи
+'''
+Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent 
+endless repetitions or incoherent outputs.
+Avoid adding a system prompt; all instructions should be contained within the user prompt.
+To ensure that the model engages in thorough reasoning, we recommend enforcing the model 
+to initiate its response with "<think>\n" at the beginning of every output.
+'''
 
 # Параметры
 MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
-
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -73,20 +76,34 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Параметры модели
 MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
 
+MAX_HISTORY_LENGTH = 5  # Ограничиваем историю диалога
+
 GENERATION_CONFIG = {
-    "bos_token_id": 151646,
-    "eos_token_id": 151646,
-    "pad_token_id": 11,
+    "bos_token_id": 1,
+    "eos_token_id": 111,
+    "pad_token_id": 1111,
     "temperature": 0.6, 
     "do_sample": True, 
     "early_stopping": True, 
     "num_return_sequences": 1, 
-    "max_new_tokens": 256,
+    "max_new_tokens": 512,
     "use_cache": True,  # Модель может использовать кэш для ускорения генерации
-    "repetition_penalty": 1.7
+    "repetition_penalty": 1.7,
+    "top_p": 0.95
 }
 
-system_prompt = "Please provide a thorough and well-reasoned response."
+SYSTEM_PROMPT = (
+    "Every response should start with '<think>' to ensure the model engages in thorough reasoning."
+    "Please provide a thorough and well-reasoned response."
+)
+
+
+class StopOnEOS(StoppingCriteria):
+    def __init__(self, eos_token_id):
+        self.eos_token_id = eos_token_id
+
+    def __call__(self, input_ids, scores, **kwargs):
+        return input_ids[0, -1] == self.eos_token_id  # Останавливаем генерацию при `eos_token_id`
 
 
 class ChatBot:
@@ -98,154 +115,136 @@ class ChatBot:
         self.model_name = MODEL_NAME
         self.tokenizer = None
         self.model = None
+        self.system_prompt = SYSTEM_PROMPT
+        self.streamer = None
+        
+        self.chat_history = []  # Храним историю сообщений
+        self.chat_history.append([{'role': 'system', 'content': self.system_prompt}])
         
         self.initialize_tokenizer()
         self.initialize_model()
+        self.initialize_streamer()
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model.to(self.device)  # Перемещаем модель на GPU, если доступно
         
     def initialize_tokenizer(self):
         # Загрузка токенизатора
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
-            ms_dtype=mindspore.float16
+            use_fast=True
             )
-        
+            
+        # Убедитесь, что pad_token установлен
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token  # Безопасный вариант
+            self.tokenizer.padding_side = "left"  # Обрезаем слева для совместимости с transformers
+
     def initialize_model(self):
         """
         Инициализация модели с использованием transformers.
         """
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            ms_dtype=mindspore.float16
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
             )
+        #self.model.to(self.device) - doesn't work
         
-        self.generation_config = self.model.generation_config
-        print("Действующие параметры модели", self.generation_config)
-        
-        '''
-        self.generation_config.bos_token_id = GENERATION_CONFIG['bos_token_id']
-        self.generation_config.eos_token_id = GENERATION_CONFIG['eos_token_id']
-        self.generation_config.pad_token_id = GENERATION_CONFIG['pad_token_id']
-        self.generation_config.temperature = GENERATION_CONFIG['temperature']
-        self.generation_config.num_return_sequences = GENERATION_CONFIG['num_return_sequences']
-        self.generation_config.max_new_tokens = GENERATION_CONFIG['max_new_tokens']
-        self.generation_config.repetition_penalty = GENERATION_CONFIG['repetition_penalty']
-        
-        print("Действующие параметры модели", self.generation_config)
-        '''
+    def initialize_streamer(self):
+        self.streamer = TextIteratorStreamer(self.tokenizer, 
+                                        skip_prompt=True, 
+                                        skip_special_tokens=True)
+    
+    def build_input_from_chat_history(self, msg: str):
+        """Формируем историю сообщений в виде строки для модели."""
+        self.chat_history.append({'role': 'user', 'content': msg})
+        return f"\n{self.chat_history}"
 
-    def preprocess_prompt(self, prompt):
-        """
-        Предварительная обработка входного запроса для улучшения качества ответа.
-        :param prompt: Входной запрос пользователя.
-        :return: Обработанный запрос.
-        """
-        # Добавляем инструкции для модели
-        processed_prompt = (
-            f"<think>\n{prompt}\n</think>",
-            system_prompt
+    async def predict(self, user_input):
+        """Асинхронная генерация ответа с streamer."""
+        prompt = self.build_input_from_chat_history(user_input)
+
+        # Токенизируем ввод (ФИКС ошибки attention_mask)
+        inputs = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=1024
         )
-        return processed_prompt
-    
-    def build_input_from_chat_history(self, chat_history, msg: str):
-        messages = [{'role': 'system', 'content': system_prompt}]
-        for user_msg, ai_msg in chat_history:
-            messages.append({'role': 'user', 'content': user_msg})
-            messages.append({'role': 'assistant', 'content': ai_msg})
-        messages.append({'role': 'user', 'content': msg})
-        return messages
-    
-    # Function to generate model predictions.
-    #@lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
-    def predict(self, message, history):
-        history_transformer_format = history + [[message, ""]]
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}  # Перенос на cuda
 
-        # Formatting the input for the model.
+        # Запускаем генерацию в отдельном потоке
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        thread = Thread(target=self.model.generate, kwargs={"streamer": streamer, **inputs})
+        thread.start()
+
+        response = ""
+        async for new_token in self.stream_response(streamer, response):
+            print(new_token[len(response):], end="", flush=True)
+            response = new_token
+
+        return response
+        
+        '''
+        Version 1.0.0
         messages = self.build_input_from_chat_history(history, message)
         
-        # Предварительная обработка запроса (можно закомментировать)
-        messages = self.preprocess_prompt(message)
-        
-        input_ids = self.tokenizer.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                return_tensors="ms",
-                tokenize=True
-            )
-        
-        streamer = TextIteratorStreamer(
-            self.tokenizer, 
-            timeout=300, 
-            skip_prompt=True, 
-            skip_special_tokens=True
-            )
-        
-        generate_kwargs = dict(
-            input_ids=input_ids,
-            streamer=streamer,
-            max_new_tokens=1024,
-            do_sample=True,
-            top_p=0.9,
-            temperature=0.1,
-            num_beams=1,
-        )
-        
-        t = Thread(target=self.model.generate, kwargs=generate_kwargs)
-        t.start()  # Starting the generation in a separate thread.
+        # Токенизируем входные данные
+        input_ids = self.tokenizer(
+            "\n".join([msg['content'] for msg in messages]),
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=1024
+        ).input_ids.to(self.device)  # Перемещаем тензоры на GPU
+
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        thread = Thread(target=self.model.generate, args=(input_ids,), kwargs={"streamer": streamer})
+        thread.start()
+
+        response = ""
+        async for new_token in self.stream_response(streamer, response):
+            print(new_token[len(response):], end="", flush=True)
+            response = new_token
+        return response
+        '''
+    
+    async def stream_response(self, streamer, response):
+        """Асинхронный поток вывода ответа в реальном времени."""
         partial_message = ""
         for new_token in streamer:
             partial_message += new_token
-            if '</s>' in partial_message:  # Breaking the loop if the stop token is generated.
-                break
             yield partial_message
-            
-    #@lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
-    def start_chat_loop(self):
-        """
-        Основной цикл диалога для взаимодействия с пользователем через терминал.
-        """
+            await asyncio.sleep(0.01)  # Даем время для асинхронного обновления UI
+
+    async def chat_loop(self):
+        """Асинхронный чат-бот."""
         print("Добро пожаловать! Вы можете начать общение с ботом. Для выхода введите 'exit' или 'quit'.")
-        
-        # История диалога
-        chat_history = []
-        
+
         while True:
             try:
-                # Получаем ввод от пользователя
-                user_input = input("Вы: ").strip()
-                
-                # Проверяем условие выхода
+                user_input = await asyncio.to_thread(input, "Вы: ")
                 if user_input.lower() in ["exit", "quit"]:
                     print("Диалог завершен.")
                     break
-                
-                # Генерируем ответ от бота
+
                 print("Бот: ", end="")
-                response = ""
-                for partial_response in self.predict(user_input, chat_history):
-                    print(partial_response[len(response):], end="", flush=True)
-                    response = partial_response
-                
-                print()  # Переход на новую строку после завершения ответа
-                
-                # Обновляем историю диалога
-                chat_history.append((user_input, response))
-            
+                response = await self.predict(user_input)
+                print()
+
             except KeyboardInterrupt:
                 print("\nДиалог прерван пользователем.")
                 break
             except Exception as e:
                 print(f"Произошла ошибка: {e}")
-                continue
-            
 
 if __name__ == "__main__":
     # Инициализация чат-бота
     chat_bot = ChatBot()
     
     # Запуск основного цикла диалога
-    chat_bot.start_chat_loop()
+    asyncio.run(chat_bot.chat_loop())
     
 
 '''
