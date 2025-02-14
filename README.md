@@ -46,26 +46,81 @@ https://github.com/ModelCloud/GPTQModel
 # pip install vllm (Linux only, not in Use)
 # pip install optimum[onnxruntime] (Not implemented)
 # pip install optimum[onnxruntime-gpu] optimum[exporters] (Not implemented)
+=======
+## Switching to Linux WSL2 - instructions
+locate your project's dirrectory
+# run 'code .'
+
+# apt-get install git
+
+## https://www.mindspore.cn/install/en
+
+# Install Miniconda:
+cd /tmp
+curl -O https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py37_4.10.3-Linux-$(arch).sh
+bash Miniconda3-py37_4.10.3-Linux-$(arch).sh -b
+cd -
+. ~/miniconda3/etc/profile.d/conda.sh
+conda init bash
+
+# Create a virtual environment, taking Python 3.11.11 as an example:
+conda create -n mindspore_py39 python=3.11.11 -y
+conda activate mindspore_py39
+
+# Run the following command to check the Python version.
+python --version
+
+# To activate this environment, use
+conda activate mindspore_py39
+
+# Install GCC 9.
+sudo apt-get install software-properties-common -y
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+sudo apt-get update
+sudo apt-get install gcc-9 -y
+
+# Installing MindSpore
+export MS_VERSION=2.5.0
+pip install https://ms-release.obs.cn-north-4.myhuaweicloud.com/${MS_VERSION}/MindSpore/unified/x86_64/mindspore-${MS_VERSION/-/}-cp311-cp311-linux_x86_64.whl --trusted-host ms-release.obs.cn-north-4.myhuaweicloud.com -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+## Installation Verification
+# run:
+python -c "import mindspore;mindspore.set_device(device_target='CPU');mindspore.run_check()"
+
+# The outputs should be the same as:
+MindSpore version: __version__
+The result of multiplication calculation is correct, MindSpore has been installed on platform [CPU] successfully!
+
+# install cuda
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
+sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
+wget https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
+sudo dpkg -i cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
+sudo cp /var/cuda-repo-ubuntu2404-12-6-local/cuda-*-keyring.gpg /usr/share/keyrings/
+sudo apt-get update
+sudo apt-get -y install cuda-toolkit-12-6
++
+mb drivers?
+
+sudo apt-get install -y nvidia-open
+or
+sudo apt-get install -y cuda-drivers
 
 # for CPU only:
 pip3 install torch torchvision torchaudio
 
 # for GPU:
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-+
 CUDA 12.6
++
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 # pip install -U langchain-community
 
-# https://www.mindspore.cn/install/en
+# pip install gradio - not sure i need it
 
-
-## Switching to Linux WSL2 - instructions
-sudo apt install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev
-
-sudo add-apt-repository ppa:deadsnakes/ppa
-
-sudo apt-get install python3.11
-
-# install pip
-curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
+## Some unused libraries
+# Installing GPTQModel (Linux only, not in Use)
+https://github.com/ModelCloud/GPTQModel
+# pip install vllm (Linux only, not in Use)
+# pip install optimum[onnxruntime] (Not implemented)
+# pip install optimum[onnxruntime-gpu] optimum[exporters] (Not implemented)
