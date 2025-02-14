@@ -157,16 +157,15 @@ class ChatBot:
         return messages
     
     # Function to generate model predictions.
-    @lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
+    #@lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
     def predict(self, message, history):
-        history_tuple = tuple(tuple(x) for x in history)  # Конвертируем список истории в кортеж
         history_transformer_format = history + [[message, ""]]
 
         # Formatting the input for the model.
         messages = self.build_input_from_chat_history(history, message)
         
         # Предварительная обработка запроса (можно закомментировать)
-        messages = lambda message: self.preprocess_prompt(message)
+        messages = self.preprocess_prompt(message)
         
         input_ids = self.tokenizer.apply_chat_template(
                 messages,
@@ -201,7 +200,7 @@ class ChatBot:
                 break
             yield partial_message
             
-    @lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
+    #@lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
     def start_chat_loop(self):
         """
         Основной цикл диалога для взаимодействия с пользователем через терминал.
