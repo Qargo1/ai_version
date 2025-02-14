@@ -2,6 +2,8 @@ ollama
 chromadb
 psycopg
 transformers
-vllm
 langchain
-resource
+bitsandbytes
+mindnlp
+
+gradio

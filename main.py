@@ -8,21 +8,44 @@
 
 # Basic import
 import logging
+import re
+import warnings
+from typing import List
 
 # External libraries
 import torch
+
+import gradio as gr
+
+import mindspore
+
+from mindnlp.transformers import AutoModelForCausalLM, AutoTokenizer
+from mindnlp.transformers import TextIteratorStreamer
+
 from transformers import (
-    AutoTokenizer, 
+    StoppingCriteria,
+    StoppingCriteriaList,
     pipeline
 )
+
+#from optimum.onnxruntime import ORTModelForSequenceClassification
+
 from functools import (
     lru_cache
 )
-#from langchain.cache import InMemoryCache
+
+from langchain_core.prompts import PromptTemplate
+from langchain.chains import ConversationChain
+from langchain.chains.conversation.memory import ConversationBufferWindowMemory
+from langchain_community.llms import SelfHostedHuggingFaceLLM
+from langchain.schema import BaseOutputParser
 
 import asyncio
 from tqdm import tqdm
 from colorama import Fore
+
+#from dotenv import load_dotenv
+#load_dotenv()
 
 
 """
@@ -41,32 +64,70 @@ MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # Параметры модели
-MODEL_NAME = "models/llm/Qwen2.5-1.5B"
+MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
+
+GENERATION_CONFIG = {
+    "bos_token_id": 151646,
+    "eos_token_id": 151646,
+    "pad_token_id": 11,
+    "temperature": 0.6, 
+    "do_sample": True, 
+    "early_stopping": True, 
+    "num_return_sequences": 1, 
+    "max_new_tokens": 256,
+    "use_cache": True,  # Модель может использовать кэш для ускорения генерации
+    "repetition_penalty": 1.7
+}
+
+system_prompt = "Please provide a thorough and well-reasoned response."
 
 
 class ChatBot:
-    def __init__(self, model_name):
+    def __init__(self):
         """
         Инициализация чат-бота.
         :param model_name: Название или путь к модели.
         """
         self.model_name = MODEL_NAME
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.tokenizer = None
+        self.model = None
+        
+        self.initialize_tokenizer()
         self.initialize_model()
-
+        
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+    def initialize_tokenizer(self):
+        # Загрузка токенизатора
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            ms_dtype=mindspore.float16
+            )
+        
     def initialize_model(self):
         """
         Инициализация модели с использованием transformers.
         """
-        try:
-            # Создаем пайплайн для генерации текста
-            self.generator = pipeline("text-generation", model=self.model_name)
-            logging.info("Модель успешно загружена с помощью transformers.")
-        except Exception as e:
-            logging.error(f"Ошибка загрузки модели: {str(e)}")
-            self.generator = None
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            ms_dtype=mindspore.float16
+            )
+        
+        self.generation_config = self.model.generation_config
+        print(self.generation_config)
+        
+        self.generation_config.bos_token_id = GENERATION_CONFIG['bos_token_id']
+        self.generation_config.eos_token_id = GENERATION_CONFIG['eos_token_id']
+        self.generation_config.pad_token_id = GENERATION_CONFIG['pad_token_id']
+        self.generation_config.temperature = GENERATION_CONFIG['temperature']
+        self.generation_config.num_return_sequences = GENERATION_CONFIG['num_return_sequences']
+        self.generation_config.max_new_tokens = GENERATION_CONFIG['max_new_tokens']
+        self.generation_config.repetition_penalty = GENERATION_CONFIG['repetition_penalty']
+        
+        print("Действующие параметры модели", self.generation_config)
 
     def preprocess_prompt(self, prompt):
         """
@@ -76,72 +137,74 @@ class ChatBot:
         """
         # Добавляем инструкции для модели
         processed_prompt = (
-            f"<think>\n{prompt}\n</think>"
-            "Please provide a thorough and well-reasoned response."
+            f"<think>\n{prompt}\n</think>",
+            system_prompt
         )
         return processed_prompt
-
+    
+    def build_input_from_chat_history(self, chat_history, msg: str):
+        messages = [{'role': 'system', 'content': system_prompt}]
+        for user_msg, ai_msg in chat_history:
+            messages.append({'role': 'user', 'content': user_msg})
+            messages.append({'role': 'assistant', 'content': ai_msg})
+        messages.append({'role': 'user', 'content': msg})
+        return messages
+    
+    # Function to generate model predictions.
     @lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
-    def generate_response(self, prompt, max_new_tokens=512, temperature=0.6, top_p=0.95):
-        """
-        Генерация ответа с использованием transformers.
-        :param prompt: Входной запрос пользователя.
-        :param max_length: Максимальная длина ответа.
-        :param temperature: Температура для генерации.
-        :param top_p: Параметр nucleus sampling (top-p).
-        :return: Сгенерированный текст.
-        """
-        try:
-            if not self.generator:
-                raise ValueError("Модель не загружена!")
-            
-            # Генерация ответа
-            response = self.generator(
-                prompt,
-                max_new_tokens = max_new_tokens,
-                truncation=True,
-                temperature=temperature,
-                top_p=top_p,
-                do_sample=True
+    def predict(self, message, history):
+        history_transformer_format = history + [[message, ""]]
+
+        # Formatting the input for the model.
+        messages = self.build_input_from_chat_history(history, message)
+        
+        # Предварительная обработка запроса (можно закомментировать)
+        messages = lambda message: self.preprocess_prompt(message)
+        
+        input_ids = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                return_tensors="ms",
+                tokenize=True
             )
-            return response[0]["generated_text"].strip()
-        except Exception as e:
-            logging.error(f"Ошибка при генерации ответа: {str(e)}")
-            return "Извините, произошла ошибка."
-
-    def start_chat_loop(self):
-        """
-        Основной цикл диалога.
-        """
-        print("Диалог начат...")
-        while True:
-            try:
-                user_input = input(Fore.WHITE + "USER: ").strip()
-                if user_input.lower() in ["exit", "quit"]:
-                    print("Диалог завершен.")
-                    break
-
-                # Предварительная обработка запроса (можно закомментировать)
-                processed_input = self.preprocess_prompt(user_input)
-
-                # Генерация ответа
-                response = self.generate_response(user_input)
-                print(Fore.LIGHTGREEN_EX + f"BOT: {response}")
-            except KeyboardInterrupt:
-                print("\nДиалог прерван пользователем.")
+        
+        streamer = TextIteratorStreamer(
+            self.tokenizer, 
+            timeout=300, 
+            skip_prompt=True, 
+            skip_special_tokens=True
+            )
+        
+        generate_kwargs = dict(
+            input_ids=input_ids,
+            streamer=streamer,
+            max_new_tokens=1024,
+            do_sample=True,
+            top_p=0.9,
+            temperature=0.1,
+            num_beams=1,
+        )
+        
+        t = Thread(target=self.model.generate, kwargs=generate_kwargs)
+        t.start()  # Starting the generation in a separate thread.
+        partial_message = ""
+        for new_token in streamer:
+            partial_message += new_token
+            if '</s>' in partial_message:  # Breaking the loop if the stop token is generated.
                 break
-            except Exception as e:
-                logging.error(f"Ошибка в диалоге: {str(e)}")
-                print("Произошла ошибка. Попробуйте снова.")
+            yield partial_message
+            
 
 if __name__ == "__main__":
     # Инициализация чат-бота
-    chat_bot = ChatBot(MODEL_NAME)
-
-    # Запуск основного цикла диалога
-    chat_bot.start_chat_loop()
+    chat_bot = ChatBot()
     
-
+    # Setting up the Gradio chat interface.
+    gr.ChatInterface(chat_bot.predict,
+                title="DeepSeek-R1-Distill-Qwen-1.5B",
+                description="问几个问题",
+                examples=['你是谁？', '介绍一下华为公司']
+                ).launch()  # Launching the web interface.
 '''
 Комментарии и предложения:
 Обработка ошибок :

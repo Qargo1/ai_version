@@ -41,29 +41,31 @@ CREATE TABLE training_data (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-# Create a local ollama model by creating Modelfile:
-
-FROM ./zephyr-ollama
-PARAMETER temperature 0.7
-PARAMETER num_ctx 4096
-TEMPLATE """{% for message in messages %}{{message['role']}}: {{message['content']}}{% endfor %}"""
-
-# Build model package
-ollama create zephyr -f ./zephyr-ollama/Modelfile
-
-# Implementing cuda and torch by running
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
 # Installing GPTQModel (Linux only, not in Use)
 https://github.com/ModelCloud/GPTQModel
 # pip install vllm (Linux only, not in Use)
+# pip install optimum[onnxruntime] (Not implemented)
+# pip install optimum[onnxruntime-gpu] optimum[exporters] (Not implemented)
 
 # for CPU only:
 pip3 install torch torchvision torchaudio
 
 # for GPU:
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 +
-CUDA 12.4
+CUDA 12.6
 
 # pip install -U langchain-community
+
+# https://www.mindspore.cn/install/en
+
+
+## Switching to Linux WSL2 - instructions
+sudo apt install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev
+
+sudo add-apt-repository ppa:deadsnakes/ppa
+
+sudo apt-get install python3.11
+
+# install pip
+curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
