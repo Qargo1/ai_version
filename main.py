@@ -9,8 +9,9 @@
 # Basic import
 import logging
 
-# External libraries
+'''
 import torch
+from optimum.onnxruntime import ORTModelForSequenceClassification
 from transformers import (
     AutoTokenizer, 
     pipeline
@@ -18,18 +19,13 @@ from transformers import (
 from functools import (
     lru_cache
 )
-#from langchain.cache import InMemoryCache
+from langchain.cache import InMemoryCache
 
 import asyncio
 from tqdm import tqdm
 from colorama import Fore
 
-#from dotenv import load_dotenv
-#load_dotenv()
-
 from dotenv import load_dotenv
-load_dotenv()
-
 import gradio as gr
 '''
 
@@ -119,13 +115,25 @@ class ChatBot:
         """
         Инициализация модели с использованием transformers.
         """
-        try:
-            # Создаем пайплайн для генерации текста
-            self.generator = pipeline("text-generation", model=self.model_name)
-            logging.info("Модель успешно загружена с помощью transformers.")
-        except Exception as e:
-            logging.error(f"Ошибка загрузки модели: {str(e)}")
-            self.generator = None
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            ms_dtype=mindspore.float16
+            )
+        
+        self.generation_config = self.model.generation_config
+        print("Действующие параметры модели", self.generation_config)
+        
+        '''
+        self.generation_config.bos_token_id = GENERATION_CONFIG['bos_token_id']
+        self.generation_config.eos_token_id = GENERATION_CONFIG['eos_token_id']
+        self.generation_config.pad_token_id = GENERATION_CONFIG['pad_token_id']
+        self.generation_config.temperature = GENERATION_CONFIG['temperature']
+        self.generation_config.num_return_sequences = GENERATION_CONFIG['num_return_sequences']
+        self.generation_config.max_new_tokens = GENERATION_CONFIG['max_new_tokens']
+        self.generation_config.repetition_penalty = GENERATION_CONFIG['repetition_penalty']
+        
+        print("Действующие параметры модели", self.generation_config)
+        '''
 
     def preprocess_prompt(self, prompt):
         """
@@ -150,62 +158,93 @@ class ChatBot:
     
     # Function to generate model predictions.
     @lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
-    def generate_response(self, prompt, max_new_tokens=512, temperature=0.6, top_p=0.95):
-        """
-        Генерация ответа с использованием transformers.
-        :param prompt: Входной запрос пользователя.
-        :param max_length: Максимальная длина ответа.
-        :param temperature: Температура для генерации.
-        :param top_p: Параметр nucleus sampling (top-p).
-        :return: Сгенерированный текст.
-        """
-        try:
-            if not self.generator:
-                raise ValueError("Модель не загружена!")
-            
-            # Генерация ответа
-            response = self.generator(
-                prompt,
-                max_new_tokens = max_new_tokens,
-                truncation=True,
-                temperature=temperature,
-                top_p=top_p,
-                do_sample=True
-            )
-            return response[0]["generated_text"].strip()
-        except Exception as e:
-            logging.error(f"Ошибка при генерации ответа: {str(e)}")
-            return "Извините, произошла ошибка."
+    def predict(self, message, history):
+        history_tuple = tuple(tuple(x) for x in history)  # Конвертируем список истории в кортеж
+        history_transformer_format = history + [[message, ""]]
 
+        # Formatting the input for the model.
+        messages = self.build_input_from_chat_history(history, message)
+        
+        # Предварительная обработка запроса (можно закомментировать)
+        messages = lambda message: self.preprocess_prompt(message)
+        
+        input_ids = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                return_tensors="ms",
+                tokenize=True
+            )
+        
+        streamer = TextIteratorStreamer(
+            self.tokenizer, 
+            timeout=300, 
+            skip_prompt=True, 
+            skip_special_tokens=True
+            )
+        
+        generate_kwargs = dict(
+            input_ids=input_ids,
+            streamer=streamer,
+            max_new_tokens=1024,
+            do_sample=True,
+            top_p=0.9,
+            temperature=0.1,
+            num_beams=1,
+        )
+        
+        t = Thread(target=self.model.generate, kwargs=generate_kwargs)
+        t.start()  # Starting the generation in a separate thread.
+        partial_message = ""
+        for new_token in streamer:
+            partial_message += new_token
+            if '</s>' in partial_message:  # Breaking the loop if the stop token is generated.
+                break
+            yield partial_message
+            
+    @lru_cache(maxsize=1000)  # Кэшируем результаты для повторяющихся запросов
     def start_chat_loop(self):
         """
-        Основной цикл диалога.
+        Основной цикл диалога для взаимодействия с пользователем через терминал.
         """
-        print("Диалог начат...")
+        print("Добро пожаловать! Вы можете начать общение с ботом. Для выхода введите 'exit' или 'quit'.")
+        
+        # История диалога
+        chat_history = []
+        
         while True:
             try:
-                user_input = input(Fore.WHITE + "USER: ").strip()
+                # Получаем ввод от пользователя
+                user_input = input("Вы: ").strip()
+                
+                # Проверяем условие выхода
                 if user_input.lower() in ["exit", "quit"]:
                     print("Диалог завершен.")
                     break
-
-                # Предварительная обработка запроса (можно закомментировать)
-                processed_input = self.preprocess_prompt(user_input)
-
-                # Генерация ответа
-                response = self.generate_response(user_input)
-                print(Fore.LIGHTGREEN_EX + f"BOT: {response}")
+                
+                # Генерируем ответ от бота
+                print("Бот: ", end="")
+                response = ""
+                for partial_response in self.predict(user_input, chat_history):
+                    print(partial_response[len(response):], end="", flush=True)
+                    response = partial_response
+                
+                print()  # Переход на новую строку после завершения ответа
+                
+                # Обновляем историю диалога
+                chat_history.append((user_input, response))
+            
             except KeyboardInterrupt:
                 print("\nДиалог прерван пользователем.")
                 break
             except Exception as e:
-                logging.error(f"Ошибка в диалоге: {str(e)}")
-                print("Произошла ошибка. Попробуйте снова.")
+                print(f"Произошла ошибка: {e}")
+                continue
+            
 
 if __name__ == "__main__":
     # Инициализация чат-бота
-    chat_bot = ChatBot(MODEL_NAME)
-
+    chat_bot = ChatBot()
+    
     # Запуск основного цикла диалога
     chat_bot.start_chat_loop()
     

@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://www.mindspore.cn/
+HostUrl=https://ms-release.obs.cn-north-4.myhuaweicloud.com/2.5.0/MindSpore/cpu/x86_64/mindspore-2.5.0-cp311-cp311-win_amd64.whl
