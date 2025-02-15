@@ -114,13 +114,25 @@ CUDA 12.6
 +
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
+# fir git-lfs - download large files from git-hub (model)
+curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+sudo apt-get install git-lfs
+
 # pip install -U langchain-community
 
 # pip install gradio - not sure i need it
 
 ## Some unused libraries
+
 # Installing GPTQModel (Linux only, not in Use) - потребуют переписывания части кода и специфического окружения.
 https://github.com/ModelCloud/GPTQModel
+pip install -v gptqmodel --no-build-isolation
+
+# pip: compile and install
+# You can install optional modules like autoround, ipex, vllm, sglang, bitblas, and ipex.
+# Example: pip install -v --no-build-isolation .[vllm,sglang,bitblas,ipex,auto_round]
+pip install -v . --no-build-isolation
+
 # pip install vllm (Linux only, not in Use) - должен ускорить работу, потребуют переписывания части кода и специфического окружения.
 # pip install optimum[onnxruntime] (Not implemented) - должен быть совместим с моим кодом
 # pip install optimum[onnxruntime-gpu] optimum[exporters] (Not implemented)
