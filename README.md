@@ -63,33 +63,12 @@ cd -
 . ~/miniconda3/etc/profile.d/conda.sh
 conda init bash
 
-# Create a virtual environment, taking Python 3.11.11 as an example:
-conda create -n mindspore_py39 python=3.11.11 -y
-conda activate mindspore_py39
+# Create a virtual environment, taking Python 3.12 as an example:
+conda create --name .conda python=3.12
+conda activate .conda
 
 # Run the following command to check the Python version.
 python --version
-
-# To activate this environment, use
-conda activate mindspore_py39
-
-# Install GCC 9.
-sudo apt-get install software-properties-common -y
-sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-sudo apt-get update
-sudo apt-get install gcc-9 -y
-
-# Installing MindSpore
-export MS_VERSION=2.5.0
-pip install https://ms-release.obs.cn-north-4.myhuaweicloud.com/${MS_VERSION}/MindSpore/unified/x86_64/mindspore-${MS_VERSION/-/}-cp311-cp311-linux_x86_64.whl --trusted-host ms-release.obs.cn-north-4.myhuaweicloud.com -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-## Installation Verification
-# run:
-python -c "import mindspore;mindspore.set_device(device_target='CPU');mindspore.run_check()"
-
-# The outputs should be the same as:
-MindSpore version: __version__
-The result of multiplication calculation is correct, MindSpore has been installed on platform [CPU] successfully!
 
 # install cuda
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
@@ -114,19 +93,27 @@ CUDA 12.6
 +
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
-# fir git-lfs - download large files from git-hub (model)
+# for git-lfs - download large files from git-hub (model)
 curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
 sudo apt-get install git-lfs
 
+
+
 # pip install -U langchain-community
 
-# pip install gradio - not sure i need it
+
+
+
+
+
 
 ## Some unused libraries
 
-# Installing GPTQModel (Linux only, not in Use) - потребуют переписывания части кода и специфического окружения.
+# Installing GPTQModel (Linux only, not in Use) - потребуют переписывания части кода и специфического окружения. - Не подошла для моего использования
 https://github.com/ModelCloud/GPTQModel
 pip install -v gptqmodel --no-build-isolation
+
+# pip install gradio - not sure i need it
 
 # pip: compile and install
 # You can install optional modules like autoround, ipex, vllm, sglang, bitblas, and ipex.
@@ -136,3 +123,21 @@ pip install -v . --no-build-isolation
 # pip install vllm (Linux only, not in Use) - должен ускорить работу, потребуют переписывания части кода и специфического окружения.
 # pip install optimum[onnxruntime] (Not implemented) - должен быть совместим с моим кодом
 # pip install optimum[onnxruntime-gpu] optimum[exporters] (Not implemented)
+
+# Install GCC 9.
+sudo apt-get install software-properties-common -y
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+sudo apt-get update
+sudo apt-get install gcc-9 -y
+
+# Installing MindSpore
+export MS_VERSION=2.5.0
+pip install https://ms-release.obs.cn-north-4.myhuaweicloud.com/${MS_VERSION}/MindSpore/unified/x86_64/mindspore-${MS_VERSION/-/}-cp311-cp311-linux_x86_64.whl --trusted-host ms-release.obs.cn-north-4.myhuaweicloud.com -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+## Installation Verification
+# run:
+python -c "import mindspore;mindspore.set_device(device_target='CPU');mindspore.run_check()"
+
+# The outputs should be the same as:
+MindSpore version: __version__
+The result of multiplication calculation is correct, MindSpore has been installed on platform [CPU] successfully!

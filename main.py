@@ -6,11 +6,6 @@
 #from tools.sql_memory import SQLMemory
 #from tools.langchain_memory import LanguageChain
 
-# Оптимизация инференса
-from optimum.onnxruntime import ORTModelForCausalLM
-from gptqmodel import GPTQModel
-#import vllm  # Импорт vllm для возможной будущей интеграции
-
 # Basic import
 import logging
 import re
@@ -31,9 +26,7 @@ from transformers import (
     StoppingCriteria,
     StoppingCriteriaList,
     pipeline,
-    GenerationConfig,
-    GPT2LMHeadModel, 
-    GPT2Tokenizer
+    GenerationConfig
 )
 
 from threading import Thread
@@ -50,8 +43,6 @@ to initiate its response with "<think>\n" at the beginning of every output.
 
 # Параметры
 MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-7B-gptqmodel-4bit-vortex-v2"
-USE_ONNX = False  # Включить для использования ONNX Runtime
-USE_GPTQ = True  # Включить при использовании GPTQ-квантизированной модели
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -59,7 +50,7 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # Параметры модели
-MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-7B-gptqmodel-4bit-vortex-v2"
+MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
 
 MAX_HISTORY_LENGTH = 5  # Ограничиваем историю диалога
 
@@ -198,22 +189,22 @@ GENERATION_CONFIG = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 512, 
+    "max_new_tokens": 2048, 
 
     # Минимальная длина генерируемой последовательности, default = 0
-    "min_length": 5, 
+    "min_length": 0, 
 
     # Минимальное количество новых токенов, default = None
     # Both `min_new_tokens` (=5) and `min_length`(=5) seem to have been set. `min_new_tokens` 
     # will take precedence. Please refer to the documentation for more information. 
     # (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
-    "min_new_tokens": None, 
+    "min_new_tokens": 64, 
 
     # Остановить генерацию, если достигнут конец строки
-    "early_stopping": True, 
+    "early_stopping": False, 
 
     # Время, через которое генерация будет остановлена (если задано), default = None
-    "max_time": 5, 
+    "max_time": 1, 
 
     # Строки, по которым генерация будет остановлена, default = None
     # ValueError: There are one or more stop strings, either in the arguments to `generate` or 
@@ -241,7 +232,7 @@ GENERATION_CONFIG = {
     "dola_layers": None, 
 
     # Использовать кэш для ускорения генерации (по умолчанию — False)
-    "use_cache": False, 
+    "use_cache": True, 
 
     # Конфигурация кэширования (если используется)
     "cache_implementation": None, 
@@ -256,10 +247,10 @@ GENERATION_CONFIG = {
     "temperature": 0.6, 
 
     # Количество токенов, сгенерированных до обрезки
-    "top_k": 30, 
+    "top_k": 50, 
 
     # Использовать top-p sampling (например, top_p=1.0 — это значит, что мы не ограничиваем выбор)
-    "top_p": 0.96, 
+    "top_p": 0.9, 
 
     # Минимальная вероятность для фильтрации токенов, default = None
     "min_p": None, 
@@ -280,7 +271,7 @@ GENERATION_CONFIG = {
     "diversity_penalty": 0.0,
 
     # Штраф за повторение слов или фраз в строках, default = 1
-    "repetition_penalty": 1.1, 
+    "repetition_penalty": 1.3, 
 
     # Штраф за повторение слов на уровне энкодера, default = 1
     "encoder_repetition_penalty": 1, 
@@ -411,17 +402,13 @@ GENERATION_CONFIG = {
 }
 
 SYSTEM_PROMPT = [
-    {"role": "system", "content": "You are a helpful and harmless assistant. You should think step-by-step."},
     {"role": "system", "content": "For mathematical questions, think step by step. Always include the final answer inside <math>{answer}</math>."},
-    {"role": "system", "content": "Always follow these rules:\n"
-                                 "1. Start response with <think>analysis</think>\n"
-                                 "2. Provide a thorough and well-reasoned response.\n"
-                                 "3. Answer and think only in ENGLISH\n"
-                                 "Example:\n"
-                                 "<think>User asked about... I need to think...</think>\n"
-                                 "**Answer:** Full answer here..."}
+    {"role": "system", "content": "Always follow these rules:"
+                                 "1. Start response with <think>analysis</think>"
+                                 "2. Provide a thorough and well-reasoned response."}
 ]
-    
+
+# print(GENERATION_CONFIG)
 
 class StopOnEOS(StoppingCriteria):
     def __init__(self, eos_token_id):
@@ -431,35 +418,13 @@ class StopOnEOS(StoppingCriteria):
         return input_ids[0, -1] == self.eos_token_id  # Останавливаем генерацию при `eos_token_id`
 
 
-class ChatBot:
+class Helper:
     def __init__(self):
-        """
-        Инициализация чат-бота.
-        :param model_name: Название или путь к модели.
-        """
-        self.model_name = MODEL_NAME
-        self.tokenizer: Optional[AutoTokenizer] = None
-        self.model = None
-        self.system_prompt = SYSTEM_PROMPT
-        self.streamer = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        self.basic_config = None
-        self.model_config_path = MODEL_CONFIG_PATH
-        self.model_config = MODEL_CONFIG
-        
-        self.create_model_config()
-        
-        self.initialize_tokenizer()
-        self.initialize_model()
-        self.initialize_streamer()
-        
-        if hasattr(self.model, 'eval'):
-            self.model.eval()
-            
+        pass
+    
     def create_model_config(self):
-        with open(self.model_config_path, "w", encoding="utf-8") as json_file:
-            json.dump(self.model_config, json_file, indent=4, ensure_ascii=False)
+        with open(MODEL_CONFIG_PATH, "w", encoding="utf-8") as json_file:
+            json.dump(MODEL_CONFIG, json_file, indent=4, ensure_ascii=False)
 
     def compare_configs(self):
         """
@@ -512,68 +477,8 @@ class ChatBot:
 
         print("\n".join(report))
         print("\n📁 Итог сохранён в `config_diff.txt`")
-
-    def initialize_tokenizer(self):
-        # Загрузка токенизатора
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name,
-            use_fast=True,
-            padding_side="left"
-            )
-            
-        # Убедитесь, что pad_token установлен
-        if not self.tokenizer.pad_token:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-        #logger.info("🔹 **Изначальные настройки токенизатора** 🔹")
-        #logger.info(self.tokenizer)
-
-    def initialize_model(self):
-        """
-        Инициализация модели с использованием transformers.
-        """
-        if USE_GPTQ:
-            # Чтение конфигурации из файла
-            if self.model_config_path:
-                # Загрузка конфигурации из файла
-                with open(self.model_config_path, "r", encoding="utf-8") as json_file:
-                    config_data = json.load(json_file)
-                self.model_config = config_data
-            else:
-                # Загрузка конфигурации из директории модели
-                self.model_config = AutoConfig.from_pretrained(self.model_name)
-                
-            self.model = GPTQModel.load(
-                self.model_name,
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float16,
-                device_map="auto",  # Автоматическое распределение по GPU/CPU
-                config=self.model_config  # Передача конфигурации
-                )
-        elif USE_ONNX:
-            self.model = ORTModelForCausalLM.from_pretrained(
-                self.model_name,
-                provider="CUDAExecutionProvider" if self.device == "cuda" else "CPUExecutionProvider",
-                export=not USE_ONNX  # Автоматическая конвертация при первом запуске
-            )
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto"
-            )
-        if self.device == "cuda" and not USE_ONNX:
-            self.model.to(self.device)
-            
-        #self.basic_config = json.loads(self.model.config.to_json_string()) 
-
-    def initialize_streamer(self):
-        self.streamer = TextIteratorStreamer(
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True,
-            timeout=60  # Увеличенное время ожидания
-        )
-    
+        
+        
     def calculate_token_length(self, text: str) -> int:
         """Вычисляет длину текста в токенах (оптимизированная версия)"""
         return self.tokenizer(text, return_length=True)["length"][0]
@@ -583,7 +488,7 @@ class ChatBot:
         #print("🔥 Raw logits:", logits[:10])  # Вывод первых 10 логитов
         #print("🔥 Min logit:", logits.min().item(), "Max logit:", logits.max().item())
         logits = torch.where(torch.isnan(logits), torch.zeros_like(logits), logits)  # Убираем NaN
-        logits = torch.where(torch.isinf(logits), torch.full_like(logits, -1e9), logits)  # Убираем Inf
+        logits = torch.where(torch.isinf(logits), torch.full_like(logits, -1e4), logits)  # Убираем Inf default = -1e9
         #print('logits: ', logits)
         return torch.nn.functional.softmax(logits, dim=-1)
     
@@ -612,6 +517,70 @@ class ChatBot:
         
         return params
 
+
+class ChatBot(Helper):
+    def __init__(self):
+        """
+        Инициализация чат-бота.
+        :param model_name: Название или путь к модели.
+        """
+        self.model_name = MODEL_NAME
+        self.tokenizer: Optional[AutoTokenizer] = None
+        self.model = None
+        self.system_prompt = SYSTEM_PROMPT
+        self.streamer = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # self.create_model_config()
+        
+        self.basic_config = None
+        self.model_config = AutoConfig.from_pretrained("models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored")
+        
+        self.initialize_tokenizer()
+        self.initialize_model()
+        self.initialize_streamer()
+        
+        if hasattr(self.model, 'eval'):
+            self.model.eval()
+
+    def initialize_tokenizer(self):
+        # Загрузка токенизатора
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            use_fast=True,
+            padding_side="left"
+            )
+            
+        # Убедитесь, что pad_token установлен
+        if not self.tokenizer.pad_token:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+        #logger.info("🔹 **Изначальные настройки токенизатора** 🔹")
+        #logger.info(self.tokenizer)
+
+    def initialize_model(self):
+        """
+        Инициализация модели с использованием одной из трех библиотек: transformers, vLLM или SGLang.
+        Выбор библиотеки осуществляется через флаги USE_TRANSFORMERS, USE_VLLM, USE_SGLANG.
+        """
+        # Использование стандартной библиотеки transformers
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            device_map="auto",
+            config=self.model_config  # Передача конфигурации
+        ).to(self.device)
+        
+        #self.basic_config = json.loads(self.model.config.to_json_string())
+
+    def initialize_streamer(self):
+        self.streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True, # пример: <｜end▁of▁sentence｜>
+            timeout=60  # Увеличенное время ожидания
+        )
+
     async def predict(self, user_input):
         """Асинхронная генерация ответа с использованием шаблона чата."""
         # Формируем сообщения для модели
@@ -623,8 +592,7 @@ class ChatBot:
             add_generation_prompt=True,
             return_tensors="pt",
             padding=True,
-            truncation=True,
-            max_length=2048
+            truncation=True
         )
 
         inputs = inputs.to(self.device)
@@ -633,33 +601,18 @@ class ChatBot:
         attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)
         inputs = inputs.to(self.device)
         
-        with torch.no_grad():
-            logits = self.model(inputs).logits[:, -1, :].to(torch.bfloat16)
-            logits = torch.clamp(logits, min=-10, max=10)  # 🔥 Ограничиваем диапазон значений
-            logits = self.safe_softmax(logits)
-            
-            next_token_id = torch.multinomial(logits, num_samples=1)
-
         # Динамически настраиваем параметры генерации
         dynamic_params = self.adjust_parameters_based_on_context(user_input)
         
-        generation_kwargs = dict(
-            input_ids=inputs,
-            attention_mask=attention_mask,  # Добавляем attention_mask
-            streamer=self.streamer,
-            stopping_criteria=StoppingCriteriaList([StopOnEOS(self.tokenizer.eos_token_id)]),
+        # Формируем параметры генерации
+        generation_kwargs = {
+            "input_ids": inputs,  # Явно указываем ключ для входных данных
+            "attention_mask": attention_mask,  # Добавляем attention_mask
+            "streamer": self.streamer,
+            # "stopping_criteria": StoppingCriteriaList([StopOnEOS(self.tokenizer.eos_token_id)]),
             **GENERATION_CONFIG,
             **dynamic_params
-        )
-        
-        '''
-        check = True
-        if check:
-            self.compare_configs()
-            logger.info(self.model.config.to_json_string())
-            print(f'Параметры генерации модели:\n{self.model.generation_config.to_dict()}')
-            check = False
-        '''
+        }
 
         # Запускаем генерацию в отдельном потоке
         thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
