@@ -189,22 +189,22 @@ GENERATION_CONFIG = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 2048, 
+    "max_new_tokens": 2028, 
 
     # Минимальная длина генерируемой последовательности, default = 0
-    "min_length": 0, 
+    "min_length": 2, 
 
     # Минимальное количество новых токенов, default = None
     # Both `min_new_tokens` (=5) and `min_length`(=5) seem to have been set. `min_new_tokens` 
     # will take precedence. Please refer to the documentation for more information. 
     # (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
-    "min_new_tokens": 64, 
+    "min_new_tokens": None, 
 
     # Остановить генерацию, если достигнут конец строки
     "early_stopping": False, 
 
     # Время, через которое генерация будет остановлена (если задано), default = None
-    "max_time": 1, 
+    "max_time": 30, 
 
     # Строки, по которым генерация будет остановлена, default = None
     # ValueError: There are one or more stop strings, either in the arguments to `generate` or 
@@ -216,7 +216,7 @@ GENERATION_CONFIG = {
     # Флаг, который управляет выбором случайных токенов (по умолчанию False, то есть без сэмплинга)
     # `diversity_penalty` is not 0.0 or `num_beam_groups` is not 1, triggering group beam search. 
     # In this generation mode, `do_sample` must be set to `False`
-    "do_sample": False, 
+    "do_sample": True, 
 
     # Количество использованных "лучей" для beam search (1 — это жадный поиск) Должно быть > 1
     # `streamer` cannot be used with beam search (yet!). Make sure that `num_beams` is set to 1.
@@ -271,13 +271,13 @@ GENERATION_CONFIG = {
     "diversity_penalty": 0.0,
 
     # Штраф за повторение слов или фраз в строках, default = 1
-    "repetition_penalty": 1.3, 
+    "repetition_penalty": 1.1, 
 
     # Штраф за повторение слов на уровне энкодера, default = 1
     "encoder_repetition_penalty": 1, 
 
     # Штраф на длину генерируемой строки, default = 1
-    "length_penalty": 1.1, 
+    "length_penalty": 1.7, 
 
     # Запрещает повторение фраз размером n-грамм
     "no_repeat_ngram_size": 0, 
@@ -405,6 +405,7 @@ SYSTEM_PROMPT = [
     {"role": "system", "content": "For mathematical questions, think step by step. Always include the final answer inside <math>{answer}</math>."},
     {"role": "system", "content": "Always follow these rules:"
                                  "1. Start response with <think>analysis</think>"
+                                 "2. After end of </think> statement unswer shortly and logicly"
                                  "2. Provide a thorough and well-reasoned response."}
 ]
 
