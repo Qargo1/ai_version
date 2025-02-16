@@ -3,9 +3,12 @@ markupsafe~=2.0
 numpy<2,>=1.26.4
 ollama
 chromadb
-psycopg
+psycopg2
 transformers
 langchain
 bitsandbytes
 mindnlp
 accelerate
+qdrant-client
+scikit-learn
+colorama

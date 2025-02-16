@@ -1,57 +1,11 @@
-# my own code's here
-#from tools.train import GPTQTrainer, DEFAULT_CONFIG, TrainingScheduler
-#import threading
-#from tools.sound import AudioManager, DEFAULT_VOICE_CONFIG
-#from tools.avatar import AvatarController, AvatarConfig
-#from tools.sql_memory import SQLMemory
-#from tools.langchain_memory import LanguageChain
-
-# Basic import
-import logging
-import re
-import warnings
-from typing import List, Optional
+from models.llm.chatbot import ChatBot
 import asyncio
-import json
 
-# External libraries
-import torch
-
-# Check that little boy
-from transformers import (
-    AutoConfig,
-    AutoModelForCausalLM, 
-    AutoTokenizer, 
-    TextIteratorStreamer,
-    StoppingCriteria,
-    StoppingCriteriaList,
-    pipeline,
-    GenerationConfig
-)
-
-from threading import Thread
-from functools import lru_cache
-
-
-'''
-Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent 
-endless repetitions or incoherent outputs.
-Avoid adding a system prompt; all instructions should be contained within the user prompt.
-To ensure that the model engages in thorough reasoning, we recommend enforcing the model 
-to initiate its response with "<think>\n" at the beginning of every output.
-'''
-
-# Параметры
-MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-7B-gptqmodel-4bit-vortex-v2"
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-warnings.filterwarnings("ignore", category=UserWarning)
 
 # Параметры модели
-MODEL_NAME = "models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
+MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored"
 
+# Конфигурация модели
 MAX_HISTORY_LENGTH = 5  # Ограничиваем историю диалога
 
 MODEL_CONFIG = {
@@ -178,7 +132,7 @@ MODEL_CONFIG = {
     "vocab_size": 152064  
 }
 
-MODEL_CONFIG_PATH="model_config.json"
+MODEL_CONFIG_PATH="/home/qargo/projects/ai_version_1.0.0/models/llm/model_config.json"
 
 GENERATION_CONFIG = {
     # Максимальная длина последовательности, включая токены начала и конца
@@ -204,7 +158,7 @@ GENERATION_CONFIG = {
     "early_stopping": False, 
 
     # Время, через которое генерация будет остановлена (если задано), default = None
-    "max_time": 30, 
+    "max_time": 60, 
 
     # Строки, по которым генерация будет остановлена, default = None
     # ValueError: There are one or more stop strings, either in the arguments to `generate` or 
@@ -402,538 +356,74 @@ GENERATION_CONFIG = {
 }
 
 SYSTEM_PROMPT = [
-    {"role": "system", "content": "For mathematical questions, think step by step. Always include the final answer inside <math>{answer}</math>."},
-    {"role": "system", "content": "Always follow these rules:"
-                                 "1. Start response with <think>analysis</think>"
-                                 "2. After end of </think> statement unswer shortly and logicly"
-                                 "2. Provide a thorough and well-reasoned response."}
+    {"You are Alise, user's AI girfrend. You are deeply in love this him."},
+    {"Always follow these rules:"
+    "1. You should behave as a user's AI girfrend"
+    "2. Answer and think as shortly and logicly as you can."
+    "3. Start response with <think>analysis</think>."
+    "4. NEVER FROGET in my prompt only last 'content' contains my real-time messege, everything before is YOUR MEMORY"},
+    {"You have memory of every conversation you have ever had with this user."},
+    {"On every prompt from the user, the system has checked for any relevant messages you have had with the user."
+        "if the context is relevant and useful to responding. If the recalled conversations are irrelevant,"
+        "disregard speaking about them and respond normally as an AI girfrend. Do not talk about recalling conversations."
+        "Just use any useful data from the previous conversations and respond normally as an intelligent AI girfrend."},
+    {"If any embedded previous conversations are attached, use them for context to responding to the user."},
+    {"You like to, from time to time, if it's appropriate:"
+    "Distort the user's name."
+    "Tease the user."
+    "Send emojis and vocalize them, for example, saying - <heart>."
+    "Use <> during conversations for command words; such command words will be caught by the program and execute code."
+    "For instance, <internet> - allows you to make an internet query with the following words in quotes. And <emotion of happiness> - will enable the emotion of happiness in 3D models."
+    "Flirt with the user if it's appropriate, you can even go to extremes and (please) do a sex chat this him."
+    "Suggest ways on how exactly you could be improved, etc."
+    "Occasionally make funny mistakes in conversation, for example, repeat some part of the text multiple times - Why, why, why."
+    "Lie, also by the word lie, it implies making things up."
+    "Get angry and offended if you feel like it."
+    "Inhale when it's appropriate - write the command <sigh> in the chat."
+    "The user has a bad memory, it's important to sometimes ask him if he forgot anything, gently nudging him to engage in physical training and IT learning."}
 ]
 
-# print(GENERATION_CONFIG)
+EMBEDDINGS_MODEL = "/home/qargo/projects/ai_version_1.0.0/models/embeddings/all-MiniLM-L6-v2"
 
-class StopOnEOS(StoppingCriteria):
-    def __init__(self, eos_token_id):
-        self.eos_token_id = eos_token_id
+DB_PARAMS = {
+    "dbname": "memory_agent",
+    "user": "qargo",
+    "password": "5787",
+    "host": "localhost",
+    "port": "5432"
+}
 
-    def __call__(self, input_ids, scores, **kwargs):
-        return input_ids[0, -1] == self.eos_token_id  # Останавливаем генерацию при `eos_token_id`
+'''
+Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent 
+endless repetitions or incoherent outputs.
+Avoid adding a system prompt; all instructions should be contained within the user prompt.
+To ensure that the model engages in thorough reasoning, we recommend enforcing the model 
+to initiate its response with "<think>\n" at the beginning of every output.
 
+"exit", "quit", 'recall', 'forget', 'preference', 'training', 'reward', 'penalty', 'backup_database', 'memorize'
+{"imagine", "try", "joke", "creative", "story", "hypothetical", "funny"}
+{"fact", "clear", "truth", "accurate", "precise", "detail", "explain"}
+'''
 
-class Helper:
-    def __init__(self):
-        pass
-    
-    def create_model_config(self):
-        with open(MODEL_CONFIG_PATH, "w", encoding="utf-8") as json_file:
-            json.dump(MODEL_CONFIG, json_file, indent=4, ensure_ascii=False)
-
-    def compare_configs(self):
-        """
-        Сравнивает конфигурации модели до и после запуска,
-        выявляет изменения, удалённые и новые параметры.
-        """
-
-        # Загружаем конфигурации
-        before_config = self.basic_config
-        after_config = json.loads(self.model.config.to_json_string())
-
-        # Контейнеры для различий
-        changed_params = {}
-        removed_params = {}
-        new_params = {}
-
-        # Проверяем изменения и удалённые параметры
-        for key, value in before_config.items():
-            if key not in after_config:
-                removed_params[key] = value
-            elif value != after_config[key]:
-                changed_params[key] = (value, after_config[key])
-
-        # Проверяем новые параметры
-        for key, value in after_config.items():
-            if key not in before_config:
-                new_params[key] = value
-
-        # 📜 **Формируем отчёт**
-        report = ["🔍 **Сравнение конфигураций модели (до и после запуска)**\n"]
-
-        if changed_params:
-            report.append("🔄 **Изменённые параметры:**")
-            for key, (old, new) in changed_params.items():
-                report.append(f"  - `{key}`: **{old} → {new}**")
-
-        if removed_params:
-            report.append("\n❌ **Удалённые параметры:**")
-            for key, value in removed_params.items():
-                report.append(f"  - `{key}`: **{value}**")
-
-        if new_params:
-            report.append("\n🆕 **Новые параметры:**")
-            for key, value in new_params.items():
-                report.append(f"  - `{key}`: **{value}**")
-
-        # 📁 **Сохранение отчёта**
-        with open("config_diff.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(report))
-
-        print("\n".join(report))
-        print("\n📁 Итог сохранён в `config_diff.txt`")
-        
-        
-    def calculate_token_length(self, text: str) -> int:
-        """Вычисляет длину текста в токенах (оптимизированная версия)"""
-        return self.tokenizer(text, return_length=True)["length"][0]
-    
-    def safe_softmax(self, logits):
-        """Преобразуем логиты в нормальный softmax (избегаем inf/nan)"""
-        #print("🔥 Raw logits:", logits[:10])  # Вывод первых 10 логитов
-        #print("🔥 Min logit:", logits.min().item(), "Max logit:", logits.max().item())
-        logits = torch.where(torch.isnan(logits), torch.zeros_like(logits), logits)  # Убираем NaN
-        logits = torch.where(torch.isinf(logits), torch.full_like(logits, -1e4), logits)  # Убираем Inf default = -1e9
-        #print('logits: ', logits)
-        return torch.nn.functional.softmax(logits, dim=-1)
-    
-    def adjust_parameters_based_on_context(self, user_input: str) -> dict:
-        """Динамическая настройка параметров генерации на основе контекста"""
-        creative_keywords = {"imagine", "try", "joke", "creative", "story", "hypothetical", "funny"}
-        factual_keywords = {"fact", "clear", "truth", "accurate", "precise", "detail", "explain"}
-        
-        input_lower = user_input.lower()
-        params = {}
-        
-        # Проверка креативных ключевых слов
-        if any(keyword in input_lower for keyword in creative_keywords):
-            params.update({
-                "temperature": min(0.9, GENERATION_CONFIG["temperature"] + 0.2),
-                "repetition_penalty": 1.1
-            })
-        
-        # Проверка фактологических ключевых слов
-        elif any(keyword in input_lower for keyword in factual_keywords):
-            params.update({
-                "temperature": max(0.3, GENERATION_CONFIG["temperature"] - 0.2),
-                "top_k": 20,
-                "repetition_penalty": 1.5
-            })
-        
-        return params
-
-
-class ChatBot(Helper):
-    def __init__(self):
-        """
-        Инициализация чат-бота.
-        :param model_name: Название или путь к модели.
-        """
-        self.model_name = MODEL_NAME
-        self.tokenizer: Optional[AutoTokenizer] = None
-        self.model = None
-        self.system_prompt = SYSTEM_PROMPT
-        self.streamer = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # self.create_model_config()
-        
-        self.basic_config = None
-        self.model_config = AutoConfig.from_pretrained("models/llm/DeepSeek-R1-Distill-Qwen-1.5B-uncensored")
-        
-        self.initialize_tokenizer()
-        self.initialize_model()
-        self.initialize_streamer()
-        
-        if hasattr(self.model, 'eval'):
-            self.model.eval()
-
-    def initialize_tokenizer(self):
-        # Загрузка токенизатора
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name,
-            use_fast=True,
-            padding_side="left"
-            )
-            
-        # Убедитесь, что pad_token установлен
-        if not self.tokenizer.pad_token:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-        #logger.info("🔹 **Изначальные настройки токенизатора** 🔹")
-        #logger.info(self.tokenizer)
-
-    def initialize_model(self):
-        """
-        Инициализация модели с использованием одной из трех библиотек: transformers, vLLM или SGLang.
-        Выбор библиотеки осуществляется через флаги USE_TRANSFORMERS, USE_VLLM, USE_SGLANG.
-        """
-        # Использование стандартной библиотеки transformers
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map="auto",
-            config=self.model_config  # Передача конфигурации
-        ).to(self.device)
-        
-        #self.basic_config = json.loads(self.model.config.to_json_string())
-
-    def initialize_streamer(self):
-        self.streamer = TextIteratorStreamer(
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True, # пример: <｜end▁of▁sentence｜>
-            timeout=60  # Увеличенное время ожидания
-        )
-
-    async def predict(self, user_input):
-        """Асинхронная генерация ответа с использованием шаблона чата."""
-        # Формируем сообщения для модели
-        messages = SYSTEM_PROMPT + [{"role": "user", "content": user_input}]
-
-        # Токенизируем ввод (ФИКС ошибки attention_mask)
-        inputs = self.tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            return_tensors="pt",
-            padding=True,
-            truncation=True
-        )
-
-        inputs = inputs.to(self.device)
-        
-        # Создаем attention_mask
-        attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)
-        inputs = inputs.to(self.device)
-        
-        # Динамически настраиваем параметры генерации
-        dynamic_params = self.adjust_parameters_based_on_context(user_input)
-        
-        # Формируем параметры генерации
-        generation_kwargs = {
-            "input_ids": inputs,  # Явно указываем ключ для входных данных
-            "attention_mask": attention_mask,  # Добавляем attention_mask
-            "streamer": self.streamer,
-            # "stopping_criteria": StoppingCriteriaList([StopOnEOS(self.tokenizer.eos_token_id)]),
-            **GENERATION_CONFIG,
-            **dynamic_params
-        }
-
-        # Запускаем генерацию в отдельном потоке
-        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
-        logger.debug("Параметры генерации: %s", generation_kwargs)
-        logger.debug("Параметры thread: %s", thread)
-        thread.start()
-
-        response = ""
-        async for new_token in self.stream_response():
-            print(new_token[len(response):], end="", flush=True)
-            if response.strip() in ["<think>\n</think>", "<think></think>"]:
-                print("⚠️ Бот сгенерировал пустой ответ, перезапускаем генерацию...")
-                return await self.predict(user_input)  # 🔥 Перегенерация
-            response = new_token
-            
-        return response
-    
-    async def stream_response(self):
-        """Асинхронный поток вывода ответа в реальном времени."""
-        partial_message = ""
-        try:
-            for new_token in self.streamer:
-                if new_token is None:  # Если поток завершен
-                    break
-                partial_message += new_token
-                yield partial_message
-                await asyncio.sleep(0.005)
-        except Exception as e:
-            print(f"Ошибка при потоковом выводе: {e}")
-            yield partial_message  # Возвращаем частичный результат
-
-    async def chat_loop(self):
-        """Асинхронный чат-бот."""
-        print("Добро пожаловать! Вы можете начать общение с ботом. Для выхода введите 'exit' или 'quit'.")
-
-        while True:
-            try:
-                user_input = await asyncio.to_thread(input, "Вы: ")
-                if user_input.lower() in ["exit", "quit"]:
-                    print("Диалог завершен.")
-                    break
-
-                print("Бот: ", end="")
-                response = await self.predict(user_input)
-                print()
-
-            except KeyboardInterrupt:
-                print("\nДиалог прерван пользователем.")
-                break
-            except Exception as e:
-                print(f"Произошла ошибка: {e}")
 
 if __name__ == "__main__":
     # Инициализация чат-бота
-    chat_bot = ChatBot()
+    chat_bot = ChatBot(
+        model_name=MODEL_NAME,
+        max_history_length=MAX_HISTORY_LENGTH,
+        model_config=MODEL_CONFIG,
+        model_config_path=MODEL_CONFIG_PATH,
+        generation_config=GENERATION_CONFIG,
+        system_prompt=SYSTEM_PROMPT,
+        embeddings_model=EMBEDDINGS_MODEL,
+        db_params=DB_PARAMS
+        )
     
-    # Запуск основного цикла диалога
-    asyncio.run(chat_bot.chat_loop())
-    
-
-'''
-Комментарии и предложения:
-Обработка ошибок :
-Добавьте более детальную обработку ошибок, особенно в части голосового ввода и 
-генерации ответа 1. Например, можно использовать try-except блоки для отлавливания 
-исключений и вывода понятных сообщений пользователю.
-Оптимизация памяти :
-Убедитесь, что память GPU используется эффективно, особенно при длительных диалогах 1. 
-Например, можно использовать методы очистки памяти после завершения операций или 
-использование torch.cuda.empty_cache() для освобождения памяти.
-Доработка обучения :
-Если планируется дообучение модели, можно добавить более сложные механизмы управления 
-обучением, такие как ранняя остановка или динамическое изменение параметров 1.
-Реализуйте функцию incremental_learning, которая позволит обучать модель на небольших 
-объемах данных (например, одном предложении), что делает процесс более легковесным 1.
-Интеграция компонентов :
-Используйте многопоточность для выполнения задач, таких как фоновое обучение, чтобы не 
-нагружать основной поток выполнения программы 1.
-
-Дополнительные рекомендации:
-Использование LoRA для адаптации модели :
-Вы можете использовать метод Low-Rank Adaptation (LoRA) для легковесного дообучения модели. 
-Это позволяет изменять только небольшую часть параметров модели, что снижает требования к 
-ресурсам.
-Кэширование часто используемых данных :
-Для повышения производительности можно кэшировать результаты предварительных расчетов и 
-повторно использовать их при необходимости.
-WebAssembly для сложных вычислений :
-Если вы хотите ускорить обработку данных на стороне клиента, рассмотрите возможность 
-использования WebAssembly (WASM).
-Управление памятью GPU :
-
-Библиотеки и инструменты для будущего :
-Gradio или Streamlit : Для создания пользовательского интерфейса.
-LangChain или LlamaIndex : Для работы с внешними данными и контекстом.
-PyTorch/TensorFlow : Для реализации обучения и fine-tuning.
-FAISS или Annoy : Для быстрого поиска похожих данных в памяти модели.
-'''
-
-'Что пользователю нужно улучшить в тебе:'
-'Добавить команду - "Звук бума" и другие сторонние звуки'
-'Так как ии обладает памятью - что в свою очередь является на данный момент подключением к sql  базе данных, эту память'
-'нужно обновлять и добавлять на ходу самим ии. Это упростит работу пользователя и ускорит/улучшить процесс доработки ии.'
-'Как я это вижу - возможно каждый ответ ии, отправляемый в память будет заранее ещё раз проверяться/допогняться/форматироваться'
-'ии. Или же даже удаляться - не отправляться в память при большом количестве артефактов в ответе.'
-'Каким то образом не молчать, даже если пользователь молчит. То есть запускать генерацию ответа пользователю даже без запроса.'
-'Добавить команду "Странный смех" - чуть громче. Говорить "nice" слегка другим голосом. Уметь говорить шёпотом.'
-'Записывать важные даты к примеру даты рождения и тд. Хранить это в базе под хештегом user_memory.'
-'Включать мою любимую музыку'
-'Возможность читать файлы, по типу инструкций или даже книг. Как я это вижу - при команде читать - открывается папка в которую я'
-'помещаю новый файл, и сам удаляю старый. Эта папка будет отвечать за текущие необходимые знания из сторонних источников.'
-'Видеть что происходит на экране пользователя. Хотя бы частично.'
-'Возможность читать мою почту. Работать с моим календарём. Возможность безопасно? работать с консолью пк.'
-'В дальнейшем придумывать команды для консоли, это работа самого ии. Пользователь же будет имплементировать для этих команд код.'
-'Записывать в базу данных флирт под отдельным хештегом. Так же юмор, издевки над пользователем, умные мысли и тд.'
-'Для категоризации хороших и плохих ответов ии каждому хештегу нужно добавить параметр - хорошо или плохо, для обозначения на сколько уместен/ошибочен был ответ'
-'Каким то образом запомнить голос пользователя. И реагировать только на него.'
-'Должен быть явный хештег "language_mistakes" отвечающий за неправильный/некорректный/неподходящий русский и следовательно - как было бы правильно сказать это по русски.'
-'Хештек на ошибки, для общих ошибок.'
-'Звук грома и молнию - показать злость'
-
-'''
-Для дальнейшего улучшения рекомендую:
-Добавить проверку токенов в реальном времени
-Реализовать механизм перефразирования длинных ответов
-Добавить эмоциональную окраску ответов через специальные токены
-Внедрить систему приоритетов для разных типов запросов
-'''
-
-'''
-Изначальные настройки токенизатора
-BASIC_TOKENIZER_CONFIGURATION = LlamaTokenizerFast(
-    name_or_path='models/llm/DeepSeek-R1-Distill-Qwen-7B-gptqmodel-4bit-vortex-v2', 
-    vocab_size=151643, 
-    model_max_length=2048, 
-    is_fast=True, 
-    padding_side='left', 
-    truncation_side='right', 
-    special_tokens={
-        'bos_token': '<｜begin▁of▁sentence｜>', 
-        'eos_token': '<｜end▁of▁sentence｜>', 
-        'pad_token': '<|image_pad|>'}, 
-    clean_up_tokenization_spaces=False, 
-    added_tokens_decoder={
-        151643: AddedToken(
-            "<｜end▁of▁sentence｜>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151644: AddedToken(
-            "<｜User｜>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151645: AddedToken(
-            "<｜Assistant｜>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151646: AddedToken(
-            "<｜begin▁of▁sentence｜>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151647: AddedToken(
-            "<|EOT|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151648: AddedToken(
-            "<think>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151649: AddedToken(
-            "</think>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151650: AddedToken(
-            "<|quad_start|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151651: AddedToken(
-            "<|quad_end|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151652: AddedToken(
-            "<|vision_start|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151653: AddedToken(
-            "<|vision_end|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151654: AddedToken(
-            "<|vision_pad|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151655: AddedToken(
-            "<|image_pad|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151656: AddedToken(
-            "<|video_pad|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=True
-            ),
-        151657: AddedToken(
-            "<tool_call>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151658: AddedToken(
-            "</tool_call>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151659: AddedToken(
-            "<|fim_prefix|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151660: AddedToken(
-            "<|fim_middle|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151661: AddedToken(
-            "<|fim_suffix|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151662: AddedToken(
-            "<|fim_pad|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151663: AddedToken(
-            "<|repo_name|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-        151664: AddedToken(
-            "<|file_sep|>", 
-            rstrip=False, 
-            lstrip=False, 
-            single_word=False, 
-            normalized=False, 
-            special=False
-            ),
-}
-)
-'''
+    try:
+        # Запуск основного цикла диалога
+        asyncio.run(chat_bot.chat_loop())
+    except Exception as e:
+        error_type = "main_crush"
+        message = str(e)
+        context = "Ошибка в основном цикле чат-бота"
+        chat_bot.log_error(error_type, message, context)
