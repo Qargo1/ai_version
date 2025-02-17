@@ -19,7 +19,7 @@ from colorama import Fore
 # External libraries
 import torch
 
-# Check that little boy
+# Different_Model_loaders
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM, 
@@ -27,6 +27,9 @@ from transformers import (
     TextIteratorStreamer,
     StoppingCriteria
 )
+from gptqmodel import GPTQModel
+from vllm import LLM, SamplingParams
+#from qwen_vl_utils import process_vision_info - vision
 
 from threading import Thread
 
@@ -155,12 +158,20 @@ class ChatBot(HelperForChatBot):
         generation_config=None,
         system_prompt=None, 
         embeddings_model=None,
-        db_params=None
+        db_params=None,
+        use_llm_loader = False,
+        use_gptq_loader = False,
+        use_awq_loader = False
         ):
         """
         Инициализация чат-бота.
         :param model_name: Название или путь к модели.
         """
+        # which loader to use? if all False => use transformer
+        self.use_llm_loader = use_llm_loader
+        self.use_gptq_loader = use_gptq_loader
+        self.use_awq_loader = use_awq_loader
+        
         # Инициализация долговременной памяти
         self.system_prompt = system_prompt
         self.convo = [
@@ -225,13 +236,26 @@ class ChatBot(HelperForChatBot):
         Инициализация модели с использованием одной из трех библиотек: transformers, vLLM или SGLang.
         Выбор библиотеки осуществляется через флаги USE_TRANSFORMERS, USE_VLLM, USE_SGLANG.
         """
-        # Использование стандартной библиотеки transformers
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map="auto",
-            config=self.model_config  # Передача конфигурации
-        ).to(self.device)
+        if self.use_gptq_loader:
+                        self.model = GPTQModel.from_quantized(
+                            self.quantized_model_id
+                            , device=self.device
+                            )
+        if self.use_vllm_loader:
+            # Инициализация модели через vLLM
+            self.model = LLM(
+                model=self.model_name,
+                dtype="float16" if torch.cuda.is_available() else "float32",
+                tensor_parallel_size=1,  # Количество GPU для распараллеливания
+            )
+        else:
+            # Использование стандартной библиотеки transformers
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device_map="auto",
+                config=self.model_config  # Передача конфигурации
+            )
         
         #self.basic_config = json.loads(self.model.config.to_json_string())
 
@@ -299,6 +323,7 @@ class ChatBot(HelperForChatBot):
             # Токенизируем ввод
             inputs = self.tokenizer.apply_chat_template(
                 messages,
+                tokenize=True, 
                 add_generation_prompt=True,
                 return_tensors="pt",
                 padding=True,
@@ -318,6 +343,8 @@ class ChatBot(HelperForChatBot):
                 **self.generation_config,
                 **dynamic_params
             }
+            
+            # self.model.to(self.device) - You shouldn't move a model that is dispatched using accelerate hooks.
 
             # Запускаем генерацию в отдельном потоке
             thread = Thread(target=self.model.generate, kwargs=generation_kwargs)

@@ -169,3 +169,26 @@ https://www.beekeeperstudio.io/
 ## Some unused libraries
 
 # pip install gradio - not sure i need it
+# Loading a GPTQ quantized model requires:
+pip install optimum
+pip install -v gptqmodel --no-build-isolation
+
+# for awq
+pip install autoawq
+
+## For 3d visual
+
+# Добавляем репозиторий NodeSource
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+
+# Устанавливаем Node.js и npm
+sudo apt-get install -y nodejs
+
+# Проверяем версии
+node -v
+npm -v
+
+# Установка зависимостей
+npm install
+
+npm run dev
