@@ -12,3 +12,6 @@ accelerate
 qdrant-client
 scikit-learn
 colorama
+vllm
+autoawq
+optimum

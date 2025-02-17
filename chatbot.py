@@ -1,4 +1,4 @@
-from tools.memory.long_term import LongTermMemory
+from long_term import LongTermMemory
 
 # Basic imports
 import time
@@ -25,9 +25,11 @@ from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer, 
     TextIteratorStreamer,
-    StoppingCriteria
+    StoppingCriteria,
+    pipeline
 )
 from gptqmodel import GPTQModel
+from awq import AutoAWQForCausalLM
 from vllm import LLM, SamplingParams
 #from qwen_vl_utils import process_vision_info - vision
 
@@ -159,18 +161,22 @@ class ChatBot(HelperForChatBot):
         system_prompt=None, 
         embeddings_model=None,
         db_params=None,
-        use_llm_loader = False,
-        use_gptq_loader = False,
-        use_awq_loader = False
+        use_vllm_loader=False,
+        use_gptq_loader=False,
+        use_awq_loader=False,
+        use_prompt_template=False
         ):
         """
         Инициализация чат-бота.
         :param model_name: Название или путь к модели.
         """
         # which loader to use? if all False => use transformer
-        self.use_llm_loader = use_llm_loader
+        self.use_vllm_loader = use_vllm_loader
         self.use_gptq_loader = use_gptq_loader
+        print("1234155315", self.use_gptq_loader)
         self.use_awq_loader = use_awq_loader
+        
+        self.use_prompt_template = use_prompt_template
         
         # Инициализация долговременной памяти
         self.system_prompt = system_prompt
@@ -237,17 +243,30 @@ class ChatBot(HelperForChatBot):
         Выбор библиотеки осуществляется через флаги USE_TRANSFORMERS, USE_VLLM, USE_SGLANG.
         """
         if self.use_gptq_loader:
-                        self.model = GPTQModel.from_quantized(
-                            self.quantized_model_id
-                            , device=self.device
-                            )
+            self.model = GPTQModel.load(
+                self.model_name,
+                device=self.device
+                )
+            return
         if self.use_vllm_loader:
             # Инициализация модели через vLLM
             self.model = LLM(
-                model=self.model_name,
+                self.model_name,
                 dtype="float16" if torch.cuda.is_available() else "float32",
                 tensor_parallel_size=1,  # Количество GPU для распараллеливания
             )
+            return
+        if self.use_awq_loader:
+            model = AutoAWQForCausalLM.from_quantized(
+                self.model_name,
+                fuse_layers=True,
+                trust_remote_code=False,
+                safetensors=True,
+                torch_dtype=torch.float16,
+                low_cpu_mem_usage=True,
+                device_map="auto",
+            )
+            return
         else:
             # Использование стандартной библиотеки transformers
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -266,6 +285,63 @@ class ChatBot(HelperForChatBot):
             skip_special_tokens=True, # пример: <｜end▁of▁sentence｜>
             timeout=60  # Увеличенное время ожидания
         )
+        
+    def generate_llama_prompt_template(self, messages, bos_token="<s>"):
+        """
+        Генерирует prompt_template для Llama на основе входных сообщений.
+        
+        :param messages: Список словарей с ключами 'role' и 'content'.
+        :param bos_token: Токен начала последовательности (например, "<s>").
+        :return: Отформатированная строка prompt_template.
+        """
+        if not messages:
+            raise ValueError("Список сообщений пуст.")
+        
+        # Разделяем системное сообщение (если оно есть) и остальные сообщения
+        if messages[0]['role'] == 'system':
+            # Преобразуем content в строку, если это список
+            system_content = messages[0]['content']
+            if isinstance(system_content, list):
+                system_content = ' '.join(str(item) for item in system_content)
+            
+            system_message = (
+                f"<|start_header_id|>system<|end_header_id|>\n\n"
+                f"{system_content.strip()}<|eot_id|>"
+            )
+            loop_messages = messages[1:]
+        else:
+            system_message = ""
+            loop_messages = messages
+        
+        # Формируем prompt
+        prompt_parts = [bos_token]
+        for i, message in enumerate(loop_messages):
+            # Проверяем чередование ролей
+            if (message['role'] == 'user') != (i % 2 == 0):
+                raise ValueError("Роли в диалоге должны чередоваться user/assistant/user/assistant...")
+            
+            # Добавляем системное сообщение перед первым сообщением
+            if i == 0 and system_message:
+                prompt_parts.append(system_message)
+            
+            # Преобразуем content в строку, если это список
+            content = message['content']
+            if isinstance(content, list):
+                content = ' '.join(str(item) for item in content)
+            
+            # Формируем сообщение
+            formatted_message = (
+                f"<|start_header_id|>{message['role']}<|end_header_id|>\n\n"
+                f"{content.strip()}<|eot_id|>"
+            )
+            prompt_parts.append(formatted_message)
+            
+            # Добавляем приглашение для генерации ответа, если это последнее сообщение от пользователя
+            if i == len(loop_messages) - 1 and message['role'] == 'user' and self.use_prompt_template:
+                prompt_parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        
+        # Объединяем все части в одну строку
+        return ''.join(prompt_parts)
 
     async def predict(self, user_input):
         """Асинхронная генерация ответа с использованием шаблона чата."""
@@ -319,16 +395,29 @@ class ChatBot(HelperForChatBot):
             except Exception as e:
                 logging.error(f"Ошибка в tokenize: {str(e)}")
             '''
-            
-            # Токенизируем ввод
-            inputs = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=True, 
-                add_generation_prompt=True,
-                return_tensors="pt",
-                padding=True,
-                truncation=True
-            )
+            if self.use_prompt_template:
+                # Генерируем prompt_template с помощью нашей функции
+                prompt_template = self.generate_llama_prompt_template(
+                    messages, 
+                    bos_token="<s>"
+                    )
+                
+                inputs = self.tokenizer(
+                    prompt_template, 
+                    return_tensors='pt'
+                    ).input_ids.cuda()
+                
+                print(f"Использован кастомный chat_template")
+            else:
+                # Токенизируем ввод
+                inputs = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=True, 
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True
+                )
             
             # Создаем attention_mask
             attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)

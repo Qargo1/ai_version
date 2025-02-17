@@ -165,16 +165,15 @@ INSERT INTO user_preferences (prompt, response) VALUES ('What is your name?', 'M
 https://www.pgadmin.org/ 
 or
 https://www.beekeeperstudio.io/
+or
+Table Plus
+
+# Loading a GPTQ quantized model requires:
+pip install -v gptqmodel --no-build-isolation
 
 ## Some unused libraries
 
 # pip install gradio - not sure i need it
-# Loading a GPTQ quantized model requires:
-pip install optimum
-pip install -v gptqmodel --no-build-isolation
-
-# for awq
-pip install autoawq
 
 ## For 3d visual
 

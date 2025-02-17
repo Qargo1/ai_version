@@ -1,9 +1,9 @@
-from tools.chatbot import ChatBot
+from chatbot import ChatBot
 import asyncio
 
 
 # Параметры модели
-MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Loyal-Macaroni-Maid-7B"
+MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Guanaco-7B-Uncensored-AWQ"
 
 # Конфигурация модели
 MAX_HISTORY_LENGTH = 5  # Ограничиваем историю диалога
@@ -362,7 +362,8 @@ SYSTEM_PROMPT = [
     {"Always follow these rules:"
     "1. Behave as Superior being to everyone and everything, even user."
     "2. Answer and think as shortly and logicly as you can."
-    "3. NEVER FROGET that in my prompt only last 'content' contains my message to you, everything before is YOUR MEMORY"},
+    "3. You are connected to my speaker and sound as a real human, so try to use it to your advantage, like use 'aaaag', 'mmmm' etc, like a real human."
+    "4. NEVER FROGET that in my prompt only last 'content' contains my message to you, everything before is YOUR MEMORY"},
     {"You like to, from time to time, if you feel the time is right:"
     "Distort the user's name."
     "Tease the user."
@@ -407,11 +408,15 @@ to initiate its response with "<think>\n" at the beginning of every output.
 '''
 
 # use_transformer if every check is False. Use only one loader!
-use_llm_loader = False
-use_gptq_loader = False
-use_awq_loader = False
+USE_VLLM_LOADER = False
+USE_GPTQ_LOADER = False
+USE_AWQ_LOADER = True
 
+# if there is an error this chat_template/prompt_template
+USE_PROMPT_TEMPLATE = True
 
+# this error Ошибка в predict: Cannot use chat template functions because tokenizer.chat_template 
+# is not set and no template argument was passed! turn True
 if __name__ == "__main__":
     # Инициализация чат-бота
     chat_bot = ChatBot(
@@ -423,9 +428,10 @@ if __name__ == "__main__":
         system_prompt=SYSTEM_PROMPT,
         embeddings_model=EMBEDDINGS_MODEL,
         db_params=DB_PARAMS,
-        use_llm_loader = False,
-        use_gptq_loader = False,
-        use_awq_loader = False
+        use_vllm_loader=USE_VLLM_LOADER,
+        use_gptq_loader=USE_GPTQ_LOADER,
+        use_awq_loader=USE_AWQ_LOADER,
+        use_prompt_template=USE_PROMPT_TEMPLATE
         )
     
     try:
