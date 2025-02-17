@@ -1,7 +1,14 @@
+tokenizers==0.19.1
+markupsafe~=2.0
+numpy<2,>=1.26.4
 ollama
 chromadb
-psycopg
+psycopg2
 transformers
-vllm
 langchain
-resource
+bitsandbytes
+mindnlp
+accelerate
+qdrant-client
+scikit-learn
+colorama

@@ -1,69 +1,171 @@
 # Big thanks to:
 www.youtube.com/@Ai_Austin - for memory setup
 
-# Implementing memory first step
-ollama pull nomic-embed-text 
-install postgreSQL and add it to the path
+=======
+## Switching to Linux WSL2 - instructions
+locate your project's dirrectory
+# run 'code .'
 
-# For tweaking postgreSQL - in terminal running commands
-psql -U postgres
+# apt-get install git
 
-CREATE USER qargo WITH PASSWORD '5787' SUPERUSER;
-CREATE DATABASE memory_agent;
-GRANT ALL PRIVILEGES ON SCHEMA public TO qargo;
-GRANT ALL PRIVILEGES ON DATABASE memory_agent TO qargo;
-\c memory_agent
-CREATE TABLE conversations (
-id SERIAL PRIMARY KEY,
-timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-prompt TEXT NOT NULL,
-response TEXT NOT NULL
-);
-INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAMP, 'what is my name?', 'Y
-our name is Dima. Known online as Qargo.');
-INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAMP, 'What is 3355 / 15?',
-'223.666667');
-INSERT INTO conversations (timestamp, prompt, response) VALUES (CURRENT_TIMESTAMP, 'What do i like?', 'You like Anime, cats, tech and your dreams');
-SELECT * FROM conversations;
+## https://www.mindspore.cn/install/en
 
-CREATE TABLE user_preferences (
-    id SERIAL PRIMARY KEY,
-    key TEXT NOT NULL,          -- Например: "favorite_food", "communication_style"
-    value TEXT NOT NULL,        -- Например: "пицца", "формальный"
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+# Install Miniconda:
+cd /tmp
+curl -O https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py37_4.10.3-Linux-$(arch).sh
+bash Miniconda3-py37_4.10.3-Linux-$(arch).sh -b
+cd -
+. ~/miniconda3/etc/profile.d/conda.sh
+conda init bash
 
-CREATE TABLE training_data (
-    id SERIAL PRIMARY KEY,
-    prompt TEXT NOT NULL,
-    response TEXT NOT NULL,
-    quality TEXT,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+# Create a virtual environment, taking Python 3.12 as an example:
+conda create --name .conda python=3.12
+conda activate .conda
 
-# Create a local ollama model by creating Modelfile:
+# Run the following command to check the Python version.
+python --version
 
-FROM ./zephyr-ollama
-PARAMETER temperature 0.7
-PARAMETER num_ctx 4096
-TEMPLATE """{% for message in messages %}{{message['role']}}: {{message['content']}}{% endfor %}"""
+# install cuda
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
+sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
+wget https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
+sudo dpkg -i cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
+sudo cp /var/cuda-repo-ubuntu2404-12-6-local/cuda-*-keyring.gpg /usr/share/keyrings/
+sudo apt-get update
+sudo apt-get -y install cuda-toolkit-12-6
++
+mb drivers?
 
-# Build model package
-ollama create zephyr -f ./zephyr-ollama/Modelfile
-
-# Implementing cuda and torch by running
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-# Installing GPTQModel (Linux only, not in Use)
-https://github.com/ModelCloud/GPTQModel
-# pip install vllm (Linux only, not in Use)
+sudo apt-get install -y nvidia-open
+or
+sudo apt-get install -y cuda-drivers
 
 # for CPU only:
 pip3 install torch torchvision torchaudio
 
 # for GPU:
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+CUDA 12.6
 +
-CUDA 12.4
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+# for git-lfs - download large files from git-hub (model)
+curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+sudo apt-get install git-lfs
 
 # pip install -U langchain-community
+
+# installing Qdrant from official site
+https://github.com/qdrant/qdrant/releases
+
+# prepare embeddings for long memory
+pip install -U sentence-transformers
+git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+
+## Installing PostgreSQL via terminal commands
+sudo apt-get update
+sudo apt install postgresql-client-common
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+sudo apt-get install libpq-dev
+sudo systemctl enable postgresql
+
+# For tweaking postgreSQL - in terminal running commands
+sudo -i -u postgres
+createuser --interactive --pwprompt
+
+createdb memory_agent
+psql
+GRANT ALL PRIVILEGES ON DATABASE memory_agent TO qargo;
+\q
+
+sudo systemctl status postgresql
+
+# Open PosgreSql in terminal and create new tables
+psql -U qargo -d memory_agent -h localhost
+
+DO $$
+DECLARE
+    table_name text;
+BEGIN
+    -- Проходим по всем таблицам в схеме 'public'
+    FOR table_name IN
+        SELECT tablename
+        FROM pg_tables
+        WHERE schemaname = 'public'
+    LOOP
+        -- Удаляем каждую таблицу с каскадным удалением зависимостей
+        EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', table_name);
+    END LOOP;
+END $$;
+
+CREATE TABLE conversations (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    prompt TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    quality TEXT
+                );
+CREATE TABLE user_preferences (
+                    id SERIAL PRIMARY KEY,
+                    prompt TEXT NOT NULL,
+                    response TEXT NOT NULL
+                );
+CREATE TABLE training_data (
+                    id SERIAL PRIMARY KEY,
+                    prompt TEXT NOT NULL,
+                    bad_response TEXT NOT NULL,
+                    right_response TEXT
+                );
+CREATE TABLE bot_errors (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    error_type TEXT NOT NULL,
+                    message TEXT NOT NULL
+                );
+                
+ALTER TABLE conversations
+ADD CONSTRAINT unique_prompt_response UNIQUE (prompt, response);
+
+CREATE OR REPLACE FUNCTION limit_conversations_per_prompt()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Удаляем старые записи, если количество строк с таким prompt превышает 5
+    DELETE FROM conversations
+    WHERE prompt = NEW.prompt
+    AND id NOT IN (
+        SELECT id
+        FROM conversations
+        WHERE prompt = NEW.prompt
+        ORDER BY timestamp DESC
+        LIMIT 5
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_limit_conversations
+AFTER INSERT ON conversations
+FOR EACH ROW
+EXECUTE FUNCTION limit_conversations_per_prompt();
+
+ALTER TABLE user_preferences
+ADD CONSTRAINT unique_content UNIQUE (prompt);
+
+INSERT INTO conversations (timestamp, prompt, response, quality) VALUES (CURRENT_TIMESTAMP, 'what is my name?', 'Your name is Dima. Known online as Qargo.', 'good');
+INSERT INTO conversations (timestamp, prompt, response, quality) VALUES (CURRENT_TIMESTAMP, 'What is 3355 / 15?',
+'223.666667', 'good');
+INSERT INTO conversations (timestamp, prompt, response, quality) VALUES (CURRENT_TIMESTAMP, 'What do i like?', 'You like Anime, cats, tech and your dreams', 'good');
+
+INSERT INTO user_preferences (prompt, response) VALUES ('What is my name', 'Your name is Dima');
+INSERT INTO user_preferences (prompt, response) VALUES ('What is your name?', 'My name is Alise, i am your girfriend, how could even forget something like this???!!!!');
+
+\q
+
+# For GUI install: 
+https://www.pgadmin.org/ 
+or
+https://www.beekeeperstudio.io/
+
+## Some unused libraries
+
+# pip install gradio - not sure i need it
