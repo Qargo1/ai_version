@@ -1,4 +1,4 @@
-from models.llm.chatbot import ChatBot
+from tools.chatbot import ChatBot
 import asyncio
 
 
