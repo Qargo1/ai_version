@@ -29,9 +29,6 @@ from transformers import (
     StoppingCriteriaList,
     pipeline
 )
-from gptqmodel import GPTQModel
-from awq import AutoAWQForCausalLM
-from vllm import LLM, SamplingParams
 #from qwen_vl_utils import process_vision_info - vision
 
 from threading import Thread
@@ -41,23 +38,6 @@ from threading import Thread
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=UserWarning)
-
-
-class StopOnCustomTokens(StoppingCriteria):
-    def __init__(self, stop_token_ids, stop_strings=None, tokenizer=None):
-        self.tokenizer = tokenizer
-        self.stop_token_ids = stop_token_ids
-        self.stop_strings = stop_strings if stop_strings else []
-
-    def __call__(self, input_ids, scores, **kwargs):
-        # Проверяем по токенам
-        if any([input_ids[0][-1] == token_id for token_id in self.stop_token_ids]):
-            return True
-        # Проверяем по строкам
-        decoded_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=True)
-        if any(stop_string in decoded_text for stop_string in self.stop_strings):
-            return True
-        return False
 
 
 class HelperForChatBot:
@@ -231,6 +211,7 @@ class ChatBot(HelperForChatBot):
         use_vllm_loader=False,
         use_gptq_loader=False,
         use_awq_loader=False,
+        use_gguf_loader=False,
         use_prompt_template=False
         ):
         """
@@ -241,25 +222,18 @@ class ChatBot(HelperForChatBot):
         self.use_vllm_loader = use_vllm_loader
         self.use_gptq_loader = use_gptq_loader
         self.use_awq_loader = use_awq_loader
+        self.use_gguf_loader = use_gguf_loader
         
         self.use_prompt_template = use_prompt_template
         self.system_prompt_check = True
         
         # Инициализация долговременной памяти
         self.system_prompt = system_prompt
-        self.convo = [
-            {
-                'role': 'system', 
-                'content': self.system_prompt
-                }
-            ]
+
         self.long_memory = LongTermMemory(
-            convo=self.convo, 
             db_params=db_params
             )
-        
-        self.max_history_length = max_history_length
-        
+
         self.model_name = model_name
         self.tokenizer: Optional[AutoTokenizer] = None
         self.model = None
@@ -311,12 +285,16 @@ class ChatBot(HelperForChatBot):
         """
         try:
             if self.use_gptq_loader:
+                from gptqmodel import GPTQModel
+                
                 self.model = GPTQModel.load(
                     self.model_name,
                     device=self.device
                     )
                 return
-            if self.use_vllm_loader:
+            elif self.use_vllm_loader:
+                from vllm import LLM, SamplingParams
+                
                 # Инициализация модели через vLLM
                 self.model = LLM(
                     self.model_name,
@@ -324,7 +302,9 @@ class ChatBot(HelperForChatBot):
                     tensor_parallel_size=1,  # Количество GPU для распараллеливания
                 )
                 return
-            if self.use_awq_loader:
+            elif self.use_awq_loader:
+                from awq import AutoAWQForCausalLM
+                
                 self.model = AutoAWQForCausalLM.from_quantized(
                     self.model_name,
                     fuse_layers=True,
@@ -335,6 +315,14 @@ class ChatBot(HelperForChatBot):
                     device_map="auto",
                 )
                 return
+            elif self.use_gguf_loader:
+                from gguf import GGUFModel
+                
+                self.model = GGUFModel(
+                    self.model_name,
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    device_map="auto"
+                )
             else:
                 # Использование стандартной библиотеки transformers
                 self.model = AutoModelForCausalLM.from_pretrained(
@@ -351,24 +339,26 @@ class ChatBot(HelperForChatBot):
     def initialize_streamer(self):
         self.streamer = TextIteratorStreamer(
             self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True, # пример: <｜end▁of▁sentence｜>
-            timeout=60  # Увеличенное время ожидания
+            skip_prompt=True
         )
 
     async def predict(self, user_input):
         """Асинхронная генерация ответа с использованием шаблона чата."""
         # Формируем сообщения для модели
         try:
+            '''
             try:
                 if self.system_prompt_check:
-                    messages = self.convo + [{"role": "user", "content": user_input}]
+                    messages = [{"role": "system", "content": self.system_prompt}] + [{"role": "user", "content": user_input}]
                 else:
                     messages = list(self.short_memory) + [{"role": "user", "content": user_input}]
             except Exception as e:
                 print(f'\nException_1 in async def predict: {e}\nWe will use only user_input for generation')
                 messages = [{"role": "user", "content": user_input}]
-       
+            '''    
+            
+            messages = [{"role": "system", "content": self.system_prompt}] + list(self.short_memory) + [{"role": "user", "content": user_input}]
+            
             self.short_memory.append({"role": "user", "content": user_input})
             
             try:
@@ -389,9 +379,7 @@ class ChatBot(HelperForChatBot):
         try:           
             # Динамически настраиваем параметры генерации
             dynamic_params = self.adjust_parameters_based_on_context(user_input)
-            
-            self.tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
-            
+                        
             # Токенизируем ввод
             inputs = self.tokenizer.apply_chat_template(
                 messages,
@@ -406,13 +394,13 @@ class ChatBot(HelperForChatBot):
             attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)
             inputs = inputs.to(self.device)
             
-            if self.generation_config is not None:
+            if self.use_prompt_template:
+                self.tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
                 # Формируем параметры генерации
                 generation_kwargs = {
                     "input_ids": inputs,  # Явно указываем ключ для входных данных
                     "attention_mask": attention_mask,  # Добавляем attention_mask
                     "streamer": self.streamer,
-                    **self.generation_config,
                     **dynamic_params
                 }
             else:
@@ -421,6 +409,7 @@ class ChatBot(HelperForChatBot):
                     "input_ids": inputs,  # Явно указываем ключ для входных данных
                     "attention_mask": attention_mask,  # Добавляем attention_mask
                     "streamer": self.streamer,
+                    **self.generation_config,
                     **dynamic_params
                 }
             
@@ -435,23 +424,24 @@ class ChatBot(HelperForChatBot):
             response = ""
             async for new_token in self.stream_response():
                 print(new_token[len(response):], end="", flush=True)
-                if response.strip() in ["<think>\n</think>", "<think></think>"] and not self.use_awq_loader:
+                if response.strip() in ["<think>\n</think>", "<think></think>"]:
                     print("⚠️ Бот сгенерировал пустой ответ, перезапускаем генерацию...")
                     return await self.predict(user_input)  # 🔥 Перегенерация
                 response = new_token
                 
             # Убираем все от <think> до </think> (включая теги) перед сохранением в память
-            if not self.use_gptq_loader or not self.use_awq_loader or not self.use_vllm_loader:
+            if not self.use_gptq_loader or not self.use_vllm_loader:
                 cleaned_response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
             else:
                 cleaned_response = response
                 
             self.short_memory.append({"role": "assistant", "content": cleaned_response})
             
-            if not self.system_prompt_check:
+            if self.system_prompt_check:
+                self.system_prompt_check = False
+            else:
                 # Сохраняем диалог в долговременной памяти
                 self.long_memory.add_to_long_memory(user_input, cleaned_response)
-                self.system_prompt_check = False
                 
             return response
         except Exception as e:
@@ -514,7 +504,6 @@ class ChatBot(HelperForChatBot):
                         
                     elif command.lower() == 'forget':
                         self.long_memory.remove_last_conversation()
-                        self.convo = self.convo[:-2]
                         print('\n')
                         
                     elif command.lower() == 'preference':
@@ -528,10 +517,7 @@ class ChatBot(HelperForChatBot):
                         self.stream_response(prompt=args)
                         
                     elif command.lower() == 'training':
-                        if not self.convo or self.convo[-1]['role'] != 'user':
-                            print("Нет предыдущего промпта для обучения.")
-                            continue
-                        original_prompt = self.convo[-1]['content']
+                        original_prompt = list(self.short_memory)[-1]['content']
                         print("Промпт сохранен. Введите корректный ответ:")
                         correct_response = input(Fore.WHITE + 'CORRECT RESPONSE: \n').strip()
                         self.long_memory.store_training_data(prompt=original_prompt, response=correct_response, quality="good")
@@ -539,14 +525,14 @@ class ChatBot(HelperForChatBot):
                     
                     elif command.lower() == 'reward':
                         # Сохраняем последний ответ как "хороший"
-                        last_response = self.convo[-1]['content']
-                        self.long_memory.store_training_data(prompt=self.convo[-2]['content'], response=last_response, quality="good")
+                        last_response = list(self.short_memory)[-1]['content']
+                        self.long_memory.store_training_data(prompt=list(self.short_memory)[-2]['content'], response=last_response, quality="good")
                         print("Спасибо за обратную связь! Я запомню этот ответ как хороший.")
 
                     elif command.lower() == 'penalty':
                         # Сохраняем последний ответ как "плохой"
-                        last_response = self.convo[-1]['content']
-                        self.long_memory.store_training_data(prompt=self.convo[-2]['content'], response=last_response, quality="bad")
+                        last_response = list(self.short_memory)[-1]['content']
+                        self.long_memory.store_training_data(prompt=list(self.short_memory)[-2]['content'], response=last_response, quality="bad")
                         print("Спасибо за обратную связь! Я постараюсь улучшить этот ответ.")
                     
                     elif command.lower() == 'backup_database':
