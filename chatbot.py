@@ -390,6 +390,8 @@ class ChatBot(HelperForChatBot):
             # Динамически настраиваем параметры генерации
             dynamic_params = self.adjust_parameters_based_on_context(user_input)
             
+            self.tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
+            
             # Токенизируем ввод
             inputs = self.tokenizer.apply_chat_template(
                 messages,
@@ -404,14 +406,23 @@ class ChatBot(HelperForChatBot):
             attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)
             inputs = inputs.to(self.device)
             
-            # Формируем параметры генерации
-            generation_kwargs = {
-                "input_ids": inputs,  # Явно указываем ключ для входных данных
-                "attention_mask": attention_mask,  # Добавляем attention_mask
-                "streamer": self.streamer,
-                **self.generation_config,
-                **dynamic_params
-            }
+            if self.generation_config is not None:
+                # Формируем параметры генерации
+                generation_kwargs = {
+                    "input_ids": inputs,  # Явно указываем ключ для входных данных
+                    "attention_mask": attention_mask,  # Добавляем attention_mask
+                    "streamer": self.streamer,
+                    **self.generation_config,
+                    **dynamic_params
+                }
+            else:
+                # Формируем параметры генерации
+                generation_kwargs = {
+                    "input_ids": inputs,  # Явно указываем ключ для входных данных
+                    "attention_mask": attention_mask,  # Добавляем attention_mask
+                    "streamer": self.streamer,
+                    **dynamic_params
+                }
             
             # self.model.to(self.device) - You shouldn't move a model that is dispatched using accelerate hooks.
 

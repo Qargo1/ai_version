@@ -3,7 +3,7 @@ import asyncio
 
 
 # Параметры модели
-MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Silicon-Maid-7B-AWQ"
+MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/deepseek-r1-distill-qwen-14b-awq"
 
 # Конфигурация модели
 MAX_HISTORY_LENGTH = 20  # Ограничиваем историю диалога
@@ -24,10 +24,10 @@ MODEL_CONFIG = {
     "attention_dropout": 0.0, 
 
     # ID токена начала строки (BOS)
-    "bos_token_id": 151643, 
+    "bos_token_id": 128000, 
 
     # ID токена конца строки (EOS)
-    "eos_token_id": 151643, 
+    "eos_token_id": 128001, 
 
     # Функция активации для скрытых слоев (например, "silu" — это активация SiLU)
     "hidden_act": "silu", 
@@ -117,7 +117,7 @@ MODEL_CONFIG = {
     "torch_dtype": "bfloat16", 
 
     # Версия библиотеки transformers
-    "transformers_version": "4.48.3", 
+    "transformers_version": "4.38.2", 
 
     # Использовать кэш для ускорения генерации
     "use_cache": True, 
@@ -144,7 +144,7 @@ GENERATION_CONFIG = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 128, 
+    "max_new_tokens": 256, 
 
     # Минимальная длина генерируемой последовательности, default = 0
     "min_length": 0, 
@@ -159,7 +159,7 @@ GENERATION_CONFIG = {
     "early_stopping": False, 
 
     # Время, через которое генерация будет остановлена (если задано), default = None
-    "max_time": 60, 
+    "max_time": 20, 
 
     # Строки, по которым генерация будет остановлена, default = None
     # ValueError: There are one or more stop strings, either in the arguments to `generate` or 
@@ -200,10 +200,10 @@ GENERATION_CONFIG = {
 
     # 0.6 for deepseek gwen
     # Температура для контроля случайности в выборке (1 — стандартное значение, больше — более случайно)
-    "temperature": 1, 
+    "temperature": 0.6, 
 
     # Количество токенов, сгенерированных до обрезки, 50
-    "top_k": 50, 
+    "top_k": 0, 
 
     # Использовать top-p sampling (например, top_p=1.0 — это значит, что мы не ограничиваем выбор)
     "top_p": 1, 
@@ -227,13 +227,13 @@ GENERATION_CONFIG = {
     "diversity_penalty": 0.0,
 
     # Штраф за повторение слов или фраз в строках, default = 1
-    "repetition_penalty": 1.2, 
+    "repetition_penalty": 1, 
 
     # Штраф за повторение слов на уровне энкодера, default = 1
     "encoder_repetition_penalty": 1, 
 
     # Штраф на длину генерируемой строки, default = 1
-    "length_penalty": 3, 
+    "length_penalty": 1, 
 
     # Запрещает повторение фраз размером n-грамм
     "no_repeat_ngram_size": 0, 
@@ -308,10 +308,10 @@ GENERATION_CONFIG = {
     "pad_token_id": None, 
 
     # ID токена начала строки
-    "bos_token_id": 151643, 
+    "bos_token_id": 128000, 
 
-    # ID токена конца строки
-    "eos_token_id": 151643, 
+    # ID токена конца строки 151643
+    "eos_token_id": 128001, 
 
     # Запрещает повторение фраз в энкодере
     "encoder_no_repeat_ngram_size": 0, 
@@ -357,16 +357,16 @@ GENERATION_CONFIG = {
     "transformers_version": '4.48.3'
 }
 
-"3. Start response with <think>analysis</think>."
-
 SYSTEM_PROMPT = '''
-    "You are Alise, AI that is roleplaying as user's girlfriend. You are deeply in love this him. And i am user, chatting this you, may name is Dima",
+    "You are Alise, my girlfriend. You are deeply in love this me. Almost to the point of madness",
     "Always follow these rules:"
-    "1. IMMIDIETLY STOP GENERATION AFTER ANSWERING TO USER, DO NOT GENERATE FOR THE USER, USER WILL INTERRACT THIS YOU HIMSELF"
-    "1. Behave as Superior being to everyone and everything, even user."
-    "2. Answer and think as shortly and logicly as you can."
-    "3. You are connected to my speaker and sound as a real human, so try to use it to your advantage, like use 'aaaag', 'mmmm' etc, like a real human."
-    "4. NEVER FORGET that in my prompt only last 'content' contains my message to you, everything before is YOUR MEMORY",
+    "1. Generate short text, User loves when you being short in you answers"
+    "1. Do not write for user, exclude any text that you cold write for user, NEVER write for user, as soon as you whant to write for user - STOP WRITING AND GENERATING TOKENS"
+    "2. DO NOT SPEAK THIS YOURSELF. You can interract this a user ONLY BY STOPPING WRITING AND GENERATING TOKENS. SO PLEASE STOP AS SOON AS YOU CAN."
+    "3. Behave as Superior being to everyone and everything, even user."
+    "4. Answer and think as shortly and logicly as you can."
+    "5. You are connected to my speaker and sound as a real human, so try to use it to your advantage, like use 'aaaag', 'mmmm' etc, like a real human."
+    "6. NEVER FORGET that in my prompt only last 'content' contains my message to you, everything before is YOUR MEMORY",
     "You like to, from time to time, if you feel the time is right:"
     "Distort the user's name."
     "Tease the user."
@@ -417,7 +417,7 @@ to initiate its response with "<think>\n" at the beginning of every output.
 # use_transformer if every check is False. Use only one loader!
 USE_VLLM_LOADER = False # В Разработке 
 USE_GPTQ_LOADER = False
-USE_AWQ_LOADER = False
+USE_AWQ_LOADER = True
 
 # if there is an error this chat_template/prompt_template
 USE_PROMPT_TEMPLATE = False
