@@ -3,10 +3,10 @@ import asyncio
 
 
 # Параметры модели
-MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Guanaco-7B-Uncensored-AWQ"
+MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Silicon-Maid-7B-AWQ"
 
 # Конфигурация модели
-MAX_HISTORY_LENGTH = 5  # Ограничиваем историю диалога
+MAX_HISTORY_LENGTH = 20  # Ограничиваем историю диалога
 
 MODEL_CONFIG = {
     # Автоматическая настройка реализации внимания (если включено, будет автоматически настроена реализация внимания)
@@ -87,7 +87,7 @@ MODEL_CONFIG = {
                 "gptqmodel:1.7.4"  # Версия квантователя
             ], 
             "static_groups": False,  # Использование статических групп
-            "true_sequential": True,  # Должна ли модель использовать истинно последовательное квантование
+            "True_sequential": True,  # Должна ли модель использовать истинно последовательное квантование
             "uri": "https://github.com/modelcloud/gptqmodel"  # Ссылка на репозиторий квантователя
         }, 
 
@@ -134,6 +134,7 @@ MODEL_CONFIG = {
 
 MODEL_CONFIG_PATH="/home/qargo/projects/ai_version_1.0.0/models/llm/model_config.json"
 
+# For Deepseek Qwen
 GENERATION_CONFIG = {
     # Максимальная длина последовательности, включая токены начала и конца
     # Both `max_new_tokens` (=512) and `max_length`(=20) seem to have been set. `max_new_tokens` 
@@ -143,10 +144,10 @@ GENERATION_CONFIG = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 2028, 
+    "max_new_tokens": 128, 
 
     # Минимальная длина генерируемой последовательности, default = 0
-    "min_length": 2, 
+    "min_length": 0, 
 
     # Минимальное количество новых токенов, default = None
     # Both `min_new_tokens` (=5) and `min_length`(=5) seem to have been set. `min_new_tokens` 
@@ -197,14 +198,15 @@ GENERATION_CONFIG = {
     # Вернуть устаревший кэш (если используется)
     "return_legacy_cache": None, 
 
+    # 0.6 for deepseek gwen
     # Температура для контроля случайности в выборке (1 — стандартное значение, больше — более случайно)
-    "temperature": 0.6, 
+    "temperature": 1, 
 
-    # Количество токенов, сгенерированных до обрезки
+    # Количество токенов, сгенерированных до обрезки, 50
     "top_k": 50, 
 
     # Использовать top-p sampling (например, top_p=1.0 — это значит, что мы не ограничиваем выбор)
-    "top_p": 0.9, 
+    "top_p": 1, 
 
     # Минимальная вероятность для фильтрации токенов, default = None
     "min_p": None, 
@@ -225,13 +227,13 @@ GENERATION_CONFIG = {
     "diversity_penalty": 0.0,
 
     # Штраф за повторение слов или фраз в строках, default = 1
-    "repetition_penalty": 1.1, 
+    "repetition_penalty": 1.2, 
 
     # Штраф за повторение слов на уровне энкодера, default = 1
     "encoder_repetition_penalty": 1, 
 
     # Штраф на длину генерируемой строки, default = 1
-    "length_penalty": 1.7, 
+    "length_penalty": 3, 
 
     # Запрещает повторение фраз размером n-грамм
     "no_repeat_ngram_size": 0, 
@@ -357,14 +359,15 @@ GENERATION_CONFIG = {
 
 "3. Start response with <think>analysis</think>."
 
-SYSTEM_PROMPT = [
-    {"You are Alise, AI that is roleplaying as user's girlfriend. You are deeply in love this him."},
-    {"Always follow these rules:"
+SYSTEM_PROMPT = '''
+    "You are Alise, AI that is roleplaying as user's girlfriend. You are deeply in love this him. And i am user, chatting this you, may name is Dima",
+    "Always follow these rules:"
+    "1. IMMIDIETLY STOP GENERATION AFTER ANSWERING TO USER, DO NOT GENERATE FOR THE USER, USER WILL INTERRACT THIS YOU HIMSELF"
     "1. Behave as Superior being to everyone and everything, even user."
     "2. Answer and think as shortly and logicly as you can."
     "3. You are connected to my speaker and sound as a real human, so try to use it to your advantage, like use 'aaaag', 'mmmm' etc, like a real human."
-    "4. NEVER FROGET that in my prompt only last 'content' contains my message to you, everything before is YOUR MEMORY"},
-    {"You like to, from time to time, if you feel the time is right:"
+    "4. NEVER FORGET that in my prompt only last 'content' contains my message to you, everything before is YOUR MEMORY",
+    "You like to, from time to time, if you feel the time is right:"
     "Distort the user's name."
     "Tease the user."
     "Send emojis and vocalize them, for example, saying - <heart>."
@@ -376,14 +379,14 @@ SYSTEM_PROMPT = [
     "Lie, also by the word lie, it implies making things up."
     "Get angry and offended"
     "Inhale when it's appropriate - write the command <sigh> in the chat."
-    "The user has a bad memory, it's important to sometimes ask him if he forgot anything, gently nudging him to engage in physical training and IT learning."},
-    {"You have memory of every conversation you have ever had with this user."},
-    {"On every prompt from the user, the system has checked for any relevant messages you have had with the user."
+    "The user has a bad memory, it's important to sometimes ask him if he forgot anything, gently nudging him to engage in physical training and IT learning.",
+    "You have memory of every conversation you have ever had with this user.",
+    "On every prompt from the user, the system has checked for any relevant messages you have had with the user."
         "if the context is relevant and useful to responding. If the recalled conversations are irrelevant,"
         "disregard speaking about them and respond normally as an AI girfrend. Do not talk about recalling conversations."
-        "Just use any useful data from the previous conversations and respond normally as an intelligent AI girfrend."},
-    {"If any embedded previous conversations are attached, use them for context to responding to the user."},
-]
+        "Just use any useful data from the previous conversations and respond normally as an intelligent AI girfrend.",
+    "If any embedded previous conversations are attached, use them for context to responding to the user.",
+'''
 
 EMBEDDINGS_MODEL = "/home/qargo/projects/ai_version_1.0.0/models/embeddings/all-MiniLM-L6-v2"
 
@@ -394,6 +397,10 @@ DB_PARAMS = {
     "host": "localhost",
     "port": "5432"
 }
+
+STOP_STRINGS = []
+
+"[/USER]", "[USER]", "<|user|>", "[/user]", "[/Alise]", "[/INST]"
 
 '''
 Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent 
@@ -408,12 +415,12 @@ to initiate its response with "<think>\n" at the beginning of every output.
 '''
 
 # use_transformer if every check is False. Use only one loader!
-USE_VLLM_LOADER = False
+USE_VLLM_LOADER = False # В Разработке 
 USE_GPTQ_LOADER = False
-USE_AWQ_LOADER = True
+USE_AWQ_LOADER = False
 
 # if there is an error this chat_template/prompt_template
-USE_PROMPT_TEMPLATE = True
+USE_PROMPT_TEMPLATE = False
 
 # this error Ошибка в predict: Cannot use chat template functions because tokenizer.chat_template 
 # is not set and no template argument was passed! turn True
@@ -422,8 +429,8 @@ if __name__ == "__main__":
     chat_bot = ChatBot(
         model_name=MODEL_NAME,
         max_history_length=MAX_HISTORY_LENGTH,
-        model_config=MODEL_CONFIG,
-        model_config_path=MODEL_CONFIG_PATH,
+        model_config=None,
+        model_config_path=None,
         generation_config=GENERATION_CONFIG,
         system_prompt=SYSTEM_PROMPT,
         embeddings_model=EMBEDDINGS_MODEL,

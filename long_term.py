@@ -170,6 +170,8 @@ class LongTermMemory(HelperForSQL):
         """
         Генерирует эмбеддинг текста с использованием модели из transformers.
         """
+        pass
+        '''
         try:
             if text in self.embedding_cache:
                 return self.embedding_cache[text]
@@ -185,8 +187,11 @@ class LongTermMemory(HelperForSQL):
             return embedding
         except Exception as e:
             print(f"Exception in get_embedding: {e}")
+        '''
     
     def retrieve_embeddings(self, queries, results_per_query=2):
+        pass
+        '''
         try:
             embeddings = set()
             
@@ -204,6 +209,7 @@ class LongTermMemory(HelperForSQL):
             return embeddings
         except Exception as e:
             print(f"Exception in retrieve_embeddings: {e}")
+        '''
 
     def clean_response(self, response):
         """
@@ -231,6 +237,8 @@ class LongTermMemory(HelperForSQL):
             print(f"Exception in fetch_good_responses: {e}")
 
     def check_similar_preference(self, key, value):
+        pass
+        '''
         try:
             results = self.execute_query(
                 "SELECT value FROM user_preferences WHERE key = %s",
@@ -249,6 +257,7 @@ class LongTermMemory(HelperForSQL):
             return False
         except Exception as e:
                 print(f"Exception in check_similar_preference: {e}")
+        '''
 
     def save_user_preference(self, prompt, response):
         """Сохраняет предпочтение в базу и обновляет кэш."""
@@ -418,6 +427,8 @@ class LongTermMemory(HelperForSQL):
         
     def create_vector_db(self, conversations):
         """Создает векторную базу из `conversations`."""
+        pass
+        '''
         vector_db_name = 'conversations'
         
         try:
@@ -442,7 +453,7 @@ class LongTermMemory(HelperForSQL):
         except Exception as e:
             logging.error(f"Ошибка в create_vector_db => create_collection: {str(e)}")
     
-        '''
+
         version 1.0.0
         def cosine_similarity(self, embedding1, embedding2):
             """
@@ -490,6 +501,8 @@ class LongTermMemory(HelperForSQL):
             
     def retrieve_relevant_memory(self, query, threshold=0.8):
         """Ищет релевантные записи в долговременной памяти на основе запроса."""
+        pass
+        '''
         try:
             query_embedding = self.get_embedding(query)
             relevant_memories = []
@@ -504,6 +517,7 @@ class LongTermMemory(HelperForSQL):
             return relevant_memories
         except Exception as e:
             logging.error(f"Ошибка в retrieve_relevant_memory: {str(e)}")
+        '''
     
     def recall(self, prompt):
         """Вспоминает релевантные данные из долговременной памяти."""
