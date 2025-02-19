@@ -24,25 +24,6 @@ sudo apt update
 sudo apt install build-essential libopenblas-dev libomp-dev
 sudo apt upgrade
 
-# for CPU only:
-pip3 install torch torchvision torchaudio
-
-# for GPU:
-CUDA 12.6
-+
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-or
-pip install torch if not conda?
-
-# install library for GGUF
-for conda
-conda install -c conda-forge libgomp
-
-for venv just plain:
-CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
-or if mistakes were found and neutrolized
-CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-cache-dir --force-reinstall
-
 # pip install -U langchain-community
 
 # installing Qdrant from official site
@@ -52,6 +33,7 @@ https://github.com/qdrant/qdrant/releases
 pip install -U sentence-transformers
 git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
 
+'''
 # if you prefer conda... Install Miniconda:
 cd /tmp
 curl -O https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py37_4.10.3-Linux-$(arch).sh
@@ -63,6 +45,7 @@ conda init bash
 # Create a virtual environment, taking Python 3.12 as an example:
 conda create --name .conda python=3.12
 conda activate .conda
+'''
 
 # Run the following command to check the Python version.
 python --version
@@ -72,15 +55,42 @@ wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/
 sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
 wget https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
 sudo dpkg -i cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
-sudo cp /var/cuda-repo-ubuntu2404-12-6-local/cuda-*-keyring.gpg /usr/share/keyrings/
 sudo apt-get update
-sudo apt-get -y install cuda-toolkit-12-6
+echo 'export PATH=/usr/local/cuda-12.6/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+nvcc --version
 +
 mb drivers?
 
 sudo apt-get install -y nvidia-open
 or
 sudo apt-get install -y cuda-drivers
+
+# for CPU only:
+pip3 install torch torchvision torchaudio
+
+# for GPU:
+CUDA 12.6
++
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+or
+pip install torch if not conda?
+
+# for plain transformers (best option for me)
+pip install -U bitsandbytes
+
+# install library for GGUF
+for conda
+conda install -c conda-forge libgomp
+
+for venv just plain:
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+or if mistakes were found and neutrolized
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-cache-dir --force-reinstall
+
+# Loading a GPTQ quantized model requires: only if a going to use this type
+pip install -v gptqmodel --no-build-isolation
 
 # for git-lfs - download large files from git-hub (model)
 curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
@@ -192,9 +202,6 @@ or
 https://www.beekeeperstudio.io/
 or
 Table Plus
-
-# Loading a GPTQ quantized model requires:
-pip install -v gptqmodel --no-build-isolation
 
 ## Some unused libraries
 

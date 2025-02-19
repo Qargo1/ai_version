@@ -8,10 +8,10 @@ bitsandbytes
 mindnlp
 accelerate
 qdrant-client
-scikit-learn
+scikit-learn +
 colorama +
-torch +
-vllm
-autoawq
+vllm -
+autoawq +
 optimum
 qdrant-client
+sentence_transformers +
