@@ -50,3 +50,5 @@ chroma_db/
 /llama-env
 /chroma_db
 .gitignore
+
+__pycache__
