@@ -1,7 +1,7 @@
 import re
 import logging
 import subprocess
-from tqdm import tqdm
+#from tqdm import tqdm
 import shutil
 
 from threading import Thread
@@ -9,7 +9,7 @@ from threading import Thread
 import chromadb
 
 import psycopg2
-from psycopg2 import sql
+#from psycopg2 import sql
 
 import numpy as np
 from cachetools import LRUCache

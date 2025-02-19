@@ -10,7 +10,49 @@ locate your project's dirrectory
 
 ## https://www.mindspore.cn/install/en
 
-# Install Miniconda:
+## conda usage can create errors for llama-cpp-python
+## consider installing everything via .venv
+
+# Install python and .venv
+sudo apt update
+sudo apt install python3.12 python3.12-venv
+python3.12 -m venv llama-env
+source llama-env/bin/activate
+
+# some standart updates
+sudo apt update
+sudo apt install build-essential libopenblas-dev libomp-dev
+sudo apt upgrade
+
+# for CPU only:
+pip3 install torch torchvision torchaudio
+
+# for GPU:
+CUDA 12.6
++
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+or
+pip install torch if not conda?
+
+# install library for GGUF
+for conda
+conda install -c conda-forge libgomp
+
+for venv just plain:
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+or if mistakes were found and neutrolized
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-cache-dir --force-reinstall
+
+# pip install -U langchain-community
+
+# installing Qdrant from official site
+https://github.com/qdrant/qdrant/releases
+
+# prepare embeddings for long memory
+pip install -U sentence-transformers
+git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+
+# if you prefer conda... Install Miniconda:
 cd /tmp
 curl -O https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py37_4.10.3-Linux-$(arch).sh
 bash Miniconda3-py37_4.10.3-Linux-$(arch).sh -b
@@ -40,26 +82,9 @@ sudo apt-get install -y nvidia-open
 or
 sudo apt-get install -y cuda-drivers
 
-# for CPU only:
-pip3 install torch torchvision torchaudio
-
-# for GPU:
-CUDA 12.6
-+
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-
 # for git-lfs - download large files from git-hub (model)
 curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
 sudo apt-get install git-lfs
-
-# pip install -U langchain-community
-
-# installing Qdrant from official site
-https://github.com/qdrant/qdrant/releases
-
-# prepare embeddings for long memory
-pip install -U sentence-transformers
-git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
 
 ## Installing PostgreSQL via terminal commands
 sudo apt-get update

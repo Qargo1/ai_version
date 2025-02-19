@@ -3,7 +3,7 @@ import asyncio
 
 
 # Параметры модели
-MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/deepseek-r1-distill-qwen-1.5b-awq"
+MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Llama-3.2-3B-Instruct-Uncensored-GGUF"
 
 # Конфигурация модели
 MAX_HISTORY_LENGTH = 20  # Ограничиваем историю диалога

@@ -1,17 +1,17 @@
 tokenizers==0.19.1
 markupsafe~=2.0
-numpy<2,>=1.26.4
-ollama
-chromadb
-psycopg2
-transformers
+chromadb +
+psycopg2 +
+transformers +
 langchain
 bitsandbytes
 mindnlp
 accelerate
 qdrant-client
 scikit-learn
-colorama
+colorama +
+torch +
 vllm
 autoawq
 optimum
+qdrant-client
