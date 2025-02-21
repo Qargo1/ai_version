@@ -15,3 +15,7 @@ autoawq +
 optimum
 qdrant-client
 sentence_transformers +
+noisereduce +
+SpeechRecognition +
+omegaconf
+soundfile

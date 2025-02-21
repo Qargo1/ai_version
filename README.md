@@ -50,7 +50,7 @@ conda activate .conda
 # Run the following command to check the Python version.
 python --version
 
-# install cuda
+# install cuda if needed?
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
 sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
 wget https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
@@ -195,6 +195,45 @@ INSERT INTO user_preferences (prompt, response) VALUES ('What is my name', 'Your
 INSERT INTO user_preferences (prompt, response) VALUES ('What is your name?', 'My name is Alise, i am your girfriend, how could even forget something like this???!!!!');
 
 \q
+
+## For audio
+sudo apt update
+sudo apt install pipewire pipewire-pulse
+
+#
+sudo apt update
+sudo apt install pulseaudio
+
+# open this
+mkdir -p ~/.config/pulse
+nano ~/.config/pulse/client.conf
+
+# add this to file
+default-server = unix:/mnt/wslg/PulseServer
+
+# play test sound
+paplay /usr/share/sounds/alsa/Front_Center.wav
+
+# restart
+systemctl --user start pipewire
+systemctl --user start pipewire-pulse
+
+pip uninstall pyaudio
+sudo apt install portaudio19-dev
+pip install pyaudio
+
+export PULSE_SERVER=unix:/mnt/wslg/PulseServer
+python your_script.py
+
+#
+pip install -U openai-whisper
+
+# on Ubuntu or Debian
+sudo apt update && sudo apt install ffmpeg
+pip install setuptools-rust
+
+# Download model for audio recognishen this preferred language
+https://alphacephei.com/vosk/models
 
 # For GUI install: 
 https://www.pgadmin.org/ 
