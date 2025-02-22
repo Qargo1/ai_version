@@ -1,0 +1,3 @@
+chromadb 0.6.3 requires numpy>=1.22.5, but you have numpy 1.22.0 which is incompatible.
+langchain 0.3.19 requires numpy<2,>=1.26.4; python_version < "3.12", but you have numpy 1.22.0 which is incompatible.
+langchain-community 0.3.18 requires numpy<2,>=1.26.4; python_version < "3.12", but you have numpy 1.22.0 which is incompatible.

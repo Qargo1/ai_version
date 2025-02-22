@@ -1,0 +1,26 @@
+# Исключаем виртуальную среду
+.venv
+.next
+__pycache__
+.github
+
+# Исключаем папку с моделями и т.д.
+models
+chroma_db
+INFO
+node_modules
+tools/sound/sounds/
+public/not_used
+
+# Исключаем Git
+.git
+.gitignore
+
+# Исключаем мусор
+__pycache__
+*.pyc
+*.log
+*.bak
+temp/
+data/
+cache/

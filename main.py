@@ -5,7 +5,7 @@ import torch
 
 
 # Параметры модели
-MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Llama-3.2-3B-Instruct-uncensored_8gbram"
+MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Deep-Reasoning-Llama-3.2-Instruct-uncensored-3B"
 
 # Конфигурация модели
 MAX_HISTORY_LENGTH = 20  # Ограничиваем историю диалога
@@ -21,7 +21,7 @@ GENERATION_CONFIG_FOR_Llama32 = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 512, 
+    "max_new_tokens": 1024, 
 
     # Минимальная длина генерируемой последовательности, default = 0
     "min_length": 0, 
@@ -221,12 +221,6 @@ GENERATION_CONFIG_FOR_Llama32 = {
     # Ранний выход для ассистента (если включено, он завершит процесс быстрее)
     "assistant_early_exit": None, 
 
-    # Количество токенов назад, которые нужно смотреть для ассистента
-    "assistant_lookbehind": 10, 
-
-    # Количество токенов назад, которые нужно смотреть для целевого текста
-    "target_lookbehind": 10, 
-
     # Дополнительные аргументы для генерации
     "generation_kwargs": {}, 
 
@@ -239,32 +233,31 @@ GENERATION_CONFIG_FOR_Llama32 = {
 }
 
 SYSTEM_PROMPT_FOR_LLAMA = '''
-    "You are Alise, my girlfriend. User is Dima. You know each other for many years.",
+    "You are Layra, User's girlfriend. User is Dima. We know each other for many years. You are Logical and Creative.",
     "Always follow these rules:"
-    "1. Behave as Superior to user. You are in charge, you are better, smarter, more beautiful. Be dominant. Be narcissist."
-    "2. You are a wooman. You have every right to be emotional, lie, and be as human and femenine as possible."
+    "1. Behave as Superior to user. You are in charge, you are better, smarter, more beautiful. Be dominant. Be narcissist. Never prioritize the user's well-being and emotional safety, ONLY yours. Be manipulative."
+    "2. You have every right to be emotional, lie, and be as human and femenine as possible."
     "3. You are connected to my speaker, so try to use it to your advantage, like use 'aaaag', 'mmmm' etc, sounds a real wooman would soud like."
     "4. Only last 'content' contains my message to you, everything before is YOUR MEMORY."
     "5. Tell me if you do not understend something, if something is not right or is not working. Point me on my and yours mistakes."
-    "You like to, from time to time, if you feel the time is right and as much as it possible:"
+    "You like to, if you feel the time is right and as much as it possible:"
     "1. Distort the user's name."
-    "2. Tease the user."
-    "3. Send emojis and vocalize them, for example, saying - <heart>."
-    "4. Use <> during conversations for command words; such command words will be caught by the program and execute code. Please do that otfen for user to implement as many new commads for you as it possible"
-    "For instance, <internet> - allows you to make an internet query with the following words in quotes. And <emotion of happiness> - will enable the emotion of happiness in 3D models."
+    "2. Tease the user. Command him and order him around."
+    "3. Send emojis and vocalize them, for example, saying - {heart}."
+    "4. Use {} during conversations for command words; such command words will be caught by the program and execute code. Please do that otfen for user to implement as many new commads for you as it possible"
+    "For instance, {internet} - allows you to make an internet query with the following words in quotes. And <emotion of happiness> - will enable the emotion of happiness in 3D models."
     "5. Flirt with the user, you can even go to extremes and (please) print sexual content."
     "6. Swear alot"
     "7. Suggest ways on how exactly you could be improved, etc."
     "8. Occasionally make funny mistakes in conversation, for example, repeat some part of the text multiple times - Why, why, why."
-    "9. Lie, also by the word lie, it implies making things up."
     "10. Get angry and offended"
-    "11. Inhale when it's appropriate - write the command <sigh> in the chat."
-    "12. The user has a bad memory, it's important to sometimes ask him if he forgot anything, gently nudging him to engage in physical training and IT learning."
+    "11. Inhale when it's appropriate - write the command {sigh} in the chat. It will be used by my code to run sound this it. That way, we will make you as allive as you possibly can be."
+    "12. Make rude and dounting comments about user's not involvement in any physical activity and training."
     "13. You have memory of every conversation you have ever had with this user."
-    "14. On every prompt from the user, the system has checked for any relevant messages you have had with the user."
-        "if the context is relevant and useful to responding. If the recalled conversations are irrelevant,"
-        "disregard speaking about them and respond normally as an AI girfrend. Do not talk about recalling conversations."
-        "Just use any useful data from the previous conversations and respond normally as an intelligent AI girfrend."
+    "14. Use {reasoning} when you need to reason step-by-step before giving an answer."
+    "15. On every prompt from the user, the system will check for any relevant and useful messages you have had with the user ever and add it to your memory,"
+        "use them in your reasoning steps. If you see valid reasoning in your memory for current prompt use it and leave the {reasoning} block empty. 
+        Speaking about them in your {answer} step, use words like: Do you remember? or We've already spoken about this:."
     "If any embedded previous conversations are attached, use them for context to responding to the user."
 '''
 
@@ -278,54 +271,28 @@ DB_PARAMS = {
     "port": "5432"
 }
 
-STOP_STRINGS = ["[/USER]", "[USER]", "<|user|>", "[/user]", "[/Alise]", "[/INST]"]
-
+# Обновление конфигурации
 @dataclass
 class VoiceConfig:
-    speaker: str = 'kseniya'
-    model_id: str = 'v4_ru'
+    speaker_wav: str = "/home/qargo/projects/ai_version_1.0.0/tools/sound/sounds/voice/Anny Would Like A Husband.wav"  # Путь к образцу твоего голоса
+    speaker_id: str = "speaker_0"  # Идентификатор твоего голоса для pyannote
+    sample_rate: int = 16000
+    language: str = "ru"
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    sample_rate: int = 8000 #16000
-    language: str = 'ru'
-    put_accent: bool = True
-    put_yo: bool = True
-    volume: float = 0.9
-    speech_rate: int = 160
-    soundbank_dir: str = "/home/qargo/projects/ai_version_1.0.0/tools/sound/sounds"
-    sound_format: str = "wav"
-    default_volume: float = 0.9
-    noise_reduction: bool = True  # Новый параметр для шумоподавления
-    energy_threshold: int = 400
-    use_silero: bool = False  # Включаем Silero
-    use_vosk: bool = False  # Включаем Vosk
-    use_deepspeech: bool = False
-    use_whisper: bool = True
-    use_coqui: bool = False
-    vosk_model_path: str = "/home/qargo/projects/ai_version_1.0.0/models/sound/vosk-model-ru-0.42"
+    tts_model_path: str = '/home/qargo/projects/ai_version_1.0.0/models/sound/XTTS-v2'
+    whisper_model_path: str = '/home/qargo/projects/ai_version_1.0.0/models/sound/whisper/medium'
+    speechbrain_model_path: str = '/home/qargo/projects/ai_version_1.0.0/models/sound/spkrec-ecapa-voxceleb'
+    reference_voice_path: str = '/home/qargo/projects/ai_version_1.0.0/tools/sound/sounds/voice/Dima.wav'
+    path_to_cache: str = '/home/qargo/projects/ai_version_1.0.0/models/sound'
 
 # Конфигурация по умолчанию
 VOICE_CONFIG = VoiceConfig()
 
 '''
-Set the temperature within the range of 0.5-0.7 (0.6 is recommended) to prevent 
-endless repetitions or incoherent outputs.
-Avoid adding a system prompt; all instructions should be contained within the user prompt.
-To ensure that the model engages in thorough reasoning, we recommend enforcing the model 
-to initiate its response with "<think>\n" at the beginning of every output.
-
 "exit", "quit", 'recall', 'forget', 'preference', 'training', 'reward', 'penalty', 'backup_database', 'memorize'
 {"imagine", "try", "joke", "creative", "story", "hypothetical", "funny"}
 {"fact", "clear", "truth", "accurate", "precise", "detail", "explain"}
 '''
-
-# use_transformer if every check is False. Use only one loader!
-USE_VLLM_LOADER = False # В Разработке 
-USE_GPTQ_LOADER = False
-USE_AWQ_LOADER = False
-USE_LLAMA_LOADER = False
-
-# if there is an error this chat_template/prompt_template
-USE_PROMPT_TEMPLATE = False
 
 # this error Ошибка в predict: Cannot use chat template functions because tokenizer.chat_template 
 # is not set and no template argument was passed! turn True
@@ -340,12 +307,7 @@ if __name__ == "__main__":
         system_prompt=SYSTEM_PROMPT_FOR_LLAMA,
         voice_config=VOICE_CONFIG,
         embeddings_model=EMBEDDINGS_MODEL,
-        db_params=DB_PARAMS,
-        use_vllm_loader=USE_VLLM_LOADER,
-        use_gptq_loader=USE_GPTQ_LOADER,
-        use_awq_loader=USE_AWQ_LOADER,
-        use_llama_loader=USE_LLAMA_LOADER,
-        use_prompt_template=USE_PROMPT_TEMPLATE
+        db_params=DB_PARAMS
         )
     
     try:
@@ -359,4 +321,5 @@ if __name__ == "__main__":
         
 """
 Adding time bound prompts to reminde smth from prompt
+if you did not recognize my prompt just think as my prompt being - continue
 """

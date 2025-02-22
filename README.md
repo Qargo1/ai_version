@@ -8,47 +8,64 @@ locate your project's dirrectory
 
 # apt-get install git
 
-## https://www.mindspore.cn/install/en
-
-## conda usage can create errors for llama-cpp-python
-## consider installing everything via .venv
-
-# Install python and .venv
-sudo apt update
-sudo apt install python3.12 python3.12-venv
-python3.12 -m venv llama-env
-source llama-env/bin/activate
-
 # some standart updates
 sudo apt update
 sudo apt install build-essential libopenblas-dev libomp-dev
 sudo apt upgrade
 
-# pip install -U langchain-community
+## Docker FAQ
+# Install docker
+sudo apt update
+sudo apt install docker.io
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker qargo  # Добавить себя в группу docker
+exit
+
+# Create dockerfile in your workspace
+# Create .dockerignore
+
+# create build
+nvidia-docker build -t ai-bot .
+
+# run build
+docker run --rm -it ai-bot
+
+# работа из терминала контейнера
+docker run --rm -it --gpus all --device /dev/snd -v /mnt/wslg/PulseServer:/mnt/wslg/PulseServer -e PULSE_SERVER=unix:/mnt/wslg/PulseServer ai-bot bush
+при запуске pip install покеты будут запускаться, но при выходе из контейнера они пропадут
+
+# Подключение больших файлов моделей
+docker run --rm -it -v /home/qargo/projects/ai_version_1.0.0/models:/app/models ai-bot
+
+## Installing python 3.10
+1. **Добавь репозиторий**:
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+
+2. **Установи Python 3.11**:
+PYTHON_CONFIGURE_OPTS="--enable-framework"
+sudo apt install python3.10 python3.10-dev python3.10-venv
+sudo apt install python3.10-dev
+
+3. **Создай виртуальную среду**:
+python3.10 -m venv /home/qargo/projects/ai_version_1.0.0/.venv
+source /home/qargo/projects/ai_version_1.0.0/.venv/bin/activate
+pip install --upgrade pip
+
+4. **Проверь**:
+python --version  # Должно показать Python 3.10.x
+python -c "import _lzma; print('LZMA работает!')"
+
+# for git-lfs - download large files from git-hub (model)
+curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+sudo apt-get install git-lfs
 
 # installing Qdrant from official site
 https://github.com/qdrant/qdrant/releases
 
 # prepare embeddings for long memory
-pip install -U sentence-transformers
 git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
-
-'''
-# if you prefer conda... Install Miniconda:
-cd /tmp
-curl -O https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py37_4.10.3-Linux-$(arch).sh
-bash Miniconda3-py37_4.10.3-Linux-$(arch).sh -b
-cd -
-. ~/miniconda3/etc/profile.d/conda.sh
-conda init bash
-
-# Create a virtual environment, taking Python 3.12 as an example:
-conda create --name .conda python=3.12
-conda activate .conda
-'''
-
-# Run the following command to check the Python version.
-python --version
 
 # install cuda if needed?
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
@@ -60,41 +77,50 @@ echo 'export PATH=/usr/local/cuda-12.6/bin:$PATH' >> ~/.bashrc
 echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 nvcc --version
-+
-mb drivers?
-
-sudo apt-get install -y nvidia-open
-or
-sudo apt-get install -y cuda-drivers
 
 # for CPU only:
 pip3 install torch torchvision torchaudio
 
-# for GPU:
+## Libraries for GPU:
 CUDA 12.6
 +
+# Save libraries:
+pip install typing_extensions
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-or
-pip install torch if not conda?
+pip install -U sentence-transformers
+pip install -U psycopg2-binary
+pip install -U TTS
+pip install coqui-tts
+pip install -U PyAudio
+pip install -U openai-whisper
+pip3 install -U speechbrain
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
 
-# for plain transformers (best option for me)
+# Not sure if safe:
+pip install -U chromadb - chromadb 0.6.3 requires numpy>=1.22.5, but you have numpy 1.22.0 which is incompatible.
+
+# Not using at all
+pip install -U langchain-community
+pip install -r requirements.txt
+
+pip install psycopg2-binary
+
+git clone https://github.com/psycopg/psycopg2.git
+python setup.py build
+sudo python setup.py install
+
+pip install -r requirements.txt - should go last
+
+# For voice
+git clone https://github.com/coqui-ai/TTS
+make system-deps  # intended to be used on Ubuntu (Debian). Let us know if you have a different OS.
+make install
+
+# for plain transformers (best option for me? not thrue anymore, now it's LLama)
 pip install -U bitsandbytes
 
-# install library for GGUF
-for conda
-conda install -c conda-forge libgomp
-
-for venv just plain:
-CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
-or if mistakes were found and neutrolized
-CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-cache-dir --force-reinstall
-
-# Loading a GPTQ quantized model requires: only if a going to use this type
+# Loading a GPTQ quantized model requires: only if you are going to use this type
 pip install -v gptqmodel --no-build-isolation
-
-# for git-lfs - download large files from git-hub (model)
-curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-sudo apt-get install git-lfs
 
 ## Installing PostgreSQL via terminal commands
 sudo apt-get update
@@ -232,8 +258,11 @@ pip install -U openai-whisper
 sudo apt update && sudo apt install ffmpeg
 pip install setuptools-rust
 
-# Download model for audio recognishen this preferred language
+# Download model for audio recognishen this preferred language DEPRICATED
 https://alphacephei.com/vosk/models
+
+## Voice Installing
+pip install git+https://github.com/openai/whisper.git
 
 # For GUI install: 
 https://www.pgadmin.org/ 

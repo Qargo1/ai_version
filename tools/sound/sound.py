@@ -1,88 +1,54 @@
-import os
+from TTS.api import TTS
+
+import asyncio
+import logging
 import queue
 import threading
-import torch
-import pyaudio
-import numpy as np
+import time
+import os
 import wave
-from typing import Optional, Dict
-from concurrent.futures import ThreadPoolExecutor
-#import torchaudio
-import speech_recognition as sr
-#import librosa  # Добавляем библиотеку для анализа аудио <button class="citation-flag" data-index="7">
-#import torchvision  # Если потребуется работа с визуальными данными
-#import noisereduce as nr  # Библиотека для шумоподавления
-import logging  # Логирование
+from typing import Dict
 
-#from silero import silero_stt
-#import zipfile
-#from glob import glob
-import asyncio
-#from vosk import Model, KaldiRecognizer
-from concurrent.futures import ThreadPoolExecutor
-#import signal
-#import keyboard
-import json
-#import deepspeech
-from whisper import load_model as load_whisper
-#from coqui_stt import Model as CoquiModel
+import numpy as np
+import pyaudio
+import torch
+import torch.serialization
+import whisper
+from speechbrain.inference import SpeakerRecognition
 
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()]
-)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logging.basicConfig(level=logging.INFO)
 logging.info(f"Using device: {device}")
-print(f'\n{sr.Microphone.list_microphone_names()}\n')
 
-def handle_exception(logger, message, exception):
-    logger.error(f"{message}: {str(exception)}")
-    raise
 
 class SpeechSynthesizer:
     def __init__(self, config=None):
         self.config = config
         self.audio_queue = queue.Queue()
         self.playback_active = True
-        self.soundbank = self._load_soundbank(config.soundbank_dir, config.sound_format)
         self._init_tts()
         self._init_playback()
         logging.info("Initializing SpeechSynthesizer...")
 
     def _init_tts(self):
-        """Инициализация TTS"""
+        """Инициализация Coqui TTS с персональным голосом"""
         try:
-            self.model, _ = torch.hub.load(
-                repo_or_dir='snakers4/silero-models',
-                model='silero_tts',
-                language=self.config.language,
-                speaker=self.config.model_id
-            )
-            self.model.to(torch.device(self.config.device))
-
-            try:
-                example_text = "Привет, мир!"
-                traced_model = torch.jit.trace(self.model.apply_tts, example_text)
-                self.model = traced_model
-                logging.info("TTS модель успешно скомпилирована с JIT (trace).")
-            except Exception as e:
-                logging.error(f"Ошибка при компиляции модели с JIT: {str(e)}")
-                self.model, _ = torch.hub.load(
-                    repo_or_dir='snakers4/silero-models',
-                    model='silero_tts',
-                    language=self.config.language,
-                    speaker=self.config.model_id
-                    )
-                self.model.to(torch.device(self.config.device))
-
+            if os.path.exists(self.config.tts_model_path):
+                self.model = TTS(
+                    model_path=self.config.tts_model_path,
+                    config_path=os.path.join(self.config.tts_model_path, "config.json"),
+                    progress_bar=False,
+                    gpu=torch.cuda.is_available()
+                )
+                logging.info("Model loaded from local path.")
+            else:
+                logging.info("Model not found locally. Initializing default model...")
+                self.model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
+                logging.info("Default model initialized.")
         except Exception as e:
             logging.error(f"Ошибка загрузки TTS модели: {str(e)}")
             raise
-
 
     def _init_playback(self):
         """Инициализация аудиовоспроизведения"""
@@ -92,75 +58,13 @@ class SpeechSynthesizer:
             channels=1,
             rate=self.config.sample_rate,
             output=True,
-            frames_per_buffer=1024
+            frames_per_buffer=2048  # Увеличиваем буфер для плавности
         )
         self.thread = threading.Thread(target=self._playback_worker)
         self.thread.daemon = True
         self.thread.start()
 
     def __del__(self):
-        if hasattr(self, 'stream'):
-            self.playback_active = False
-            self.stream.stop_stream()
-            self.stream.close()
-            self.p.terminate()
-
-    def _load_soundbank(self, sound_dir: str, fmt: str) -> Dict[str, np.ndarray]:
-        """Загрузка пользовательских звуков из папки"""
-        soundbank = {}
-        if os.path.exists(sound_dir):
-            logging.info(f"Loading sounds from directory: {sound_dir}")
-            for file in os.listdir(sound_dir):
-                if file.endswith(f".{fmt}"):
-                    key = os.path.splitext(file)[0].lower()
-                    try:
-                        with wave.open(os.path.join(sound_dir, file), 'rb') as wav:
-                            # Проверяем параметры файла
-                            sample_width = wav.getsampwidth()
-                            channels = wav.getnchannels()
-                            sample_rate = wav.getframerate()
-                            logging.debug(f"File: {file}, Channels: {channels}, Sample Rate: {sample_rate}, Width: {sample_width}")
-
-                            if channels != 1 or sample_rate != self.config.sample_rate:
-                                logging.warning(f"Skipping {file}: unsupported format.")
-                                continue
-
-                            audio_data = np.frombuffer(wav.readframes(-1), dtype=np.int16)
-                            soundbank[key] = audio_data.astype(np.float32) / 32768.0
-                            logging.info(f"Loaded sound: {key}")
-                    except Exception as e:
-                        logging.error(f"Error loading {file}: {str(e)}")
-        else:
-            logging.warning(f"Sound directory not found: {sound_dir}")
-        return soundbank
-    
-    def test_synthesize(self, text: str):
-        """Test TTS without adding to the queue."""
-        try:
-            with torch.no_grad():
-                audio = self.model.apply_tts(
-                    text=text,
-                    speaker=self.config.speaker,
-                    sample_rate=self.config.sample_rate
-                )
-                logging.debug(f"Speaker: {self.config.speaker}, Sample Rate: {self.config.sample_rate}")
-            return audio.numpy()
-        except Exception as e:
-            handle_exception(logging, "TTS Test Error", e)
-            
-    def test_speech_to_text(self, audio_file: str):
-        """Тестирует распознавание речи из файла"""
-        try:
-            with sr.AudioFile(audio_file) as source:
-                audio = self.recognizer.record(source)
-                text = self.recognizer.recognize_vosk(audio)
-            logging.info(f"Recognized text: {text}")
-            return text
-        except Exception as e:
-            handle_exception(logging, "STT Test Error", e)
-    
-    def close(self):
-        """Explicitly release resources."""
         self.playback_active = False
         if hasattr(self, 'stream'):
             self.stream.stop_stream()
@@ -168,218 +72,137 @@ class SpeechSynthesizer:
         if hasattr(self, 'p'):
             self.p.terminate()
 
-    def play_sound(self, sound_name: str) -> None:
-        """Воспроизведение пользовательского звука"""
-        audio = self.soundbank.get(sound_name.lower())
-        if audio is not None:
-            self.audio_queue.put(audio)
-        else:
-            logging.warning(f"Sound {sound_name} not found!")
-
-    def synthesize(self, text: str) -> None:
+    def synthesize(self, text: str):
+        """Синтез текста с оптимизацией"""
         try:
-            with torch.no_grad():
-                audio = self.model.apply_tts(
-                    text=text,
-                    speaker=self.config.speaker,
-                    sample_rate=self.config.sample_rate
-                )
-            logging.info(f"Synthesized audio for text: '{text}'")
-            self.audio_queue.put(audio.numpy())
+            audio = self.model.tts(
+                text=text,
+                speaker_wav=self.config.speaker_wav,
+                language=self.config.language,
+                speed=1.2,  # Ускоряем на 20%
+                temperature=0.6  # Меньше вариативности для стабильности
+            )
+            audio_data = np.array(audio, dtype=np.float32)
+            self.audio_queue.put(audio_data)
         except Exception as e:
-            handle_exception(logging, "TTS Error", e)
-            
+            logging.error(f"Ошибка синтеза: {str(e)}")
+
     def _playback_worker(self):
-        """Рабочий поток для воспроизведения"""
+        """Поток воспроизведения"""
         while self.playback_active:
             try:
-                audio = self.audio_queue.get(timeout=0.5)
-                logging.info(f"Audio retrieved from queue. Length: {len(audio)}")
-                if isinstance(audio, np.ndarray):
-                    self.stream.write(audio.tobytes())
-                else:
-                    logging.error("Invalid audio format!")
+                audio = self.audio_queue.get(timeout=0.1)  # Уменьшаем таймаут для отзывчивости
+                self.stream.write(audio.tobytes())
+                self.audio_queue.task_done()
             except queue.Empty:
-                logging.debug("Queue is empty. Waiting for audio...")
                 continue
             except Exception as e:
-                logging.error(f"Playback error: {str(e)}")
-
+                logging.error(f"Ошибка воспроизведения: {str(e)}")
 
 class SpeechRecognizer:
     def __init__(self, config=None):
         self.config = config
-        self.recognizer = sr.Recognizer()
-        self.mic = sr.Microphone()
-        self.executor = ThreadPoolExecutor(max_workers=1)
-        self.listening_paused = False
-        self.model = None
+        self.mic = None
+        self.recognizer = None
+        self.speaker_verifier = None
         self._init_recognition()
         logging.info("Initializing SpeechRecognizer...")
 
     def _init_recognition(self):
-        if self.config.use_whisper:
-            logging.info("Используется Whisper")
-            self.model = load_whisper("medium")
-        elif self.config.use_silero and self.config.device == 'cuda':
-            logging.info("Используется Silero STT на GPU")
-            self.model, self.decoder, self.utils = torch.hub.load(
-                repo_or_dir='snakers4/silero-models',
-                model='silero_stt',
-                language='en', 
-                device=torch.device(self.config.device))
-            (self.read_batch, self.split_into_batches,
-            self.read_audio, self.prepare_model_input) = self.utils  # see function signature for details
-        elif self.config.use_vosk:
-            logging.info("Используется Vosk STT")
-            self.model = Model(self.config.vosk_model_path)
-            self.recognizer_vosk = KaldiRecognizer(self.model, self.config.sample_rate)
-        elif self.config.use_deepspeech:
-            logging.info("Используется DeepSpeech")
-            self.model = deepspeech.Model(self.config.deepspeech_model_path)
-        elif self.config.use_coqui:
-            logging.info("Используется Coqui STT")
-            self.model = CoquiModel(self.config.coqui_model_path)
-        
-    def __del__(self):
-        if hasattr(self, 'stream') and self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-        if hasattr(self, 'pyaudio_instance'):
-            self.pyaudio_instance.terminate()
-            
-    def close(self):
-        """Explicitly release resources."""
-        if hasattr(self, 'mic') and self.mic:
-            self.mic.__exit__(None, None, None)
-        if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=False)
-    
-    def test_recognition(self, audio_file: str):
-        """Test STT with a pre-recorded audio file."""
+        """Инициализация Whisper и SpeechBrain"""
         try:
-            with sr.AudioFile(audio_file) as source:
-                audio = self.recognizer.record(source)
-                text = self.recognizer.recognize_vosk(audio)
-            return text
+            # Загрузка Whisper
+            if os.path.exists(self.config.whisper_model_path):
+                self.model = whisper.load_model(self.config.whisper_model_path)
+            else:
+                self.model = whisper.load_model("medium", download_root=self.config.path_to_cache)
+
+            # Загрузка SpeechBrain SpeakerRecognition локально
+            self.speaker_verifier = SpeakerRecognition.from_hparams(
+                source=self.config.speechbrain_model_path,  # Путь к локальной модели
+                savedir=self.config.speechbrain_model_path
+            )
+
+            # Загрузка эталонного аудио твоего голоса
+            self.reference_voice = self.config.reference_voice_path  # Путь к твоему голосу (WAV-файл)
+            self.speaker_id = self.config.speaker_id
+
+            self.recognizer = pyaudio.PyAudio()
+            self.mic = self.recognizer.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=self.config.sample_rate,
+                input=True,
+                frames_per_buffer=1024
+            )
         except Exception as e:
-            handle_exception(logging, "STT Test Error", e)
-            
-    def _process_audio(self, audio):
-        if self.config.use_vosk:
-            return self.recognizer_vosk.AcceptWaveform(audio.get_wav_data()) 
-        elif self.config.use_whisper:
-            return self.model.transcribe(audio.get_wav_data())['text'].strip()
+            logging.error(f"Ошибка инициализации STT: {str(e)}")
+            raise
 
-    async def listen_loop(self, callback):
-        with self.mic as source:
-            while True:
-                try:
-                    #logging.info("Жду аудио...")
-                    self.recognizer.adjust_for_ambient_noise(source)  # we only need to calibrate once, before we start listening
-                    audio = self.recognizer.listen(source)#, timeout=5, phrase_time_limit=100)
+    def __del__(self):
+        if hasattr(self, 'mic'):
+            self.mic.stop_stream()
+            self.mic.close()
+        if hasattr(self, 'recognizer'):
+            self.recognizer.terminate()
 
-                    if self.config.use_whisper:
-                        try:
-                            text = self.recognizer.recognize_whisper(audio, language="russian")
-                            #logging.info(f"Текст передан{text}")
-                        except sr.UnknownValueError:
-                            print("Whisper could not understand audio")
-                        except sr.RequestError as e:
-                            print(f"Could not request results from Whisper; {e}")
-                    elif self.config.use_vosk:
-                        if self.recognizer_vosk.AcceptWaveform(audio.get_wav_data()):
-                            result = json.loads(self.recognizer_vosk.Result())
-                            text = result.get("text", "").strip()
-                        else:
-                            text = None
-                    elif self.config.use_silero:
-                        batches = self.split_into_batches(audio.get_wav_data(), batch_size=10)
-                        input = self.prepare_model_input(self.read_batch(batches[0]),
-                            device=device)
-                        text = self.model(input)
-                    elif self.config.use_deepspeech:
-                        text = self.model.stt(audio.get_wav_data())
-                    elif self.config.use_coqui:
-                        text = self.model.stt(audio.get_wav_data())
-                    else:
-                        text = self._process_audio(audio)
-                    
-                    if text:
-                        callback(text)
-                except KeyboardInterrupt:
-                    logging.info("Listening interrupted by user. Exiting gracefully...")
-                    break
-                except Exception as e:
-                    handle_exception(logging, "ASR Error", e)
-
-    def continuous_listen(self, callback):
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        loop.create_task(self.listen_loop(callback))
-        if not loop.is_running():
-            loop.run_until_complete(asyncio.sleep(0))
-            
     def listen_once(self):
-        """Однократное прослушивание микрофона"""
-        with self.mic as source:
-            try:
-                logging.info("Жду аудио...")
-                self.recognizer.adjust_for_ambient_noise(source)
-                audio = self.recognizer.listen(source, phrase_time_limit=4)# ,timeout=10)
-                
-                # Распознавание текста
-                if self.config.use_whisper:
-                    text = self.recognizer.recognize_whisper(audio, language="russian")
-                elif self.config.use_vosk:
-                    if self.recognizer_vosk.AcceptWaveform(audio.get_wav_data()):
-                        result = json.loads(self.recognizer_vosk.Result())
-                        text = result.get("text", "").strip()
-                    else:
-                        text = None
-                else:
-                    text = self._process_audio(audio)
-                
-                return text.strip().lower() if text else None
-            except sr.UnknownValueError:
-                logging.warning("Could not understand audio.")
-                return None
-            except sr.RequestError as e:
-                logging.error(f"Could not request results; {e}")
-                return None
-            except Exception as e:
-                handle_exception(logging, "ASR Error", e)
+        """Однократное прослушивание с проверкой голоса"""
+        try:
+            audio_data = []
+            for _ in range(int(self.config.sample_rate / 1024 * 10)):  # 5 секунд записи
+                data = self.mic.read(1024, exception_on_overflow=False)
+                audio_data.append(data)
+            audio = b''.join(audio_data)
+
+            # Сохранение временного файла для анализа
+            with wave.open("temp.wav", "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.config.sample_rate)
+                wf.writeframes(audio)
+
+            # Проверка голоса с помощью SpeechBrain
+            score, prediction = self.speaker_verifier.verify_files(self.reference_voice, "temp.wav")
+            speaker_detected = prediction.item()  # True/False, является ли голос твоим
+            confidence = score.item()  # Уверенность (0-1)
+
+            if not speaker_detected or confidence < 0.2:  # Порог уверенности можно настроить
+                logging.info(f"Голос не распознан как твой (уверенность: {confidence:.2f}).")
                 return None
 
-    def shutdown(self):
-        self.executor.shutdown(wait=False)
+            # Распознавание текста с помощью Whisper
+            result = self.model.transcribe("temp.wav", language="ru")
+            text = result["text"].strip()
+            return text if text else None
 
+        except Exception as e:
+            logging.error(f"Ошибка распознавания: {str(e)}")
+            return None
 
 class AudioManager:
     def __init__(self, config):
-        self.synthesizer = SpeechSynthesizer(config)
-        self.recognizer = SpeechRecognizer(config)
+        #self.synthesizer = SpeechSynthesizer(config)
+        #self.recognizer = SpeechRecognizer(config)
         self.is_listening = False
 
     def listen_and_recognize(self):
-        """Слушает микрофон и возвращает распознанный текст."""
         if self.is_listening:
-            return None  # Уже слушаем
+            return None
         self.is_listening = True
         try:
             text = self.recognizer.listen_once()
-            return text.strip().lower() if text else None
+            return text
         finally:
             self.is_listening = False
 
-    def speak(self, text):
-        """Генерирует и воспроизводит речь."""
+    async def speak(self, text):
+        """Асинхронное воспроизведение"""
         self.synthesizer.synthesize(text)
-        
-        
+        # Ожидаем начала воспроизведения
+        await asyncio.sleep(0.05)  # Минимальная задержка для старта
+
+
 '''
 Основные предложения:
 Шумоподавление :
