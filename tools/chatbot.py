@@ -53,13 +53,13 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-class HelperForChatBot:
+class HelperForLLM:
     def __init__(self):
         self.llamacpp_cache = None
         
-    def initialize_model_transformers(self): 
-        try:               
-            quantization_config = BitsAndBytesConfig(
+    def initialize_engine(self): 
+        try:
+            BitsAndBytesConfig(
                 bnb_4bit_compute_dtype="float32",
                 bnb_4bit_quant_storage="uint8",
                 bnb_4bit_quant_type="fp4",
@@ -72,79 +72,78 @@ class HelperForChatBot:
                 llm_int8_threshold=6.0
                 )
             
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                quantization_config=quantization_config,
-                device_map="auto",
-                config=self.model_config or AutoConfig.from_pretrained(self.model_name)
+            # Инициализация AsyncLLMEngine
+            self.engine = LLM(
+                model=self.engine_name,
+                tokenizer=self.tokenizer,
+                max_model_len=4096,
+                enforce_eager=True,
+                enable_chunked_prefill=True,  # Включите это
+                quantization="bitsandbytes",
+                load_format="bitsandbytes"
             )
+            
+            self.sampling_params = SamplingParams(
+                temperature=self.generation_config["temperature"],
+                top_p=self.generation_config["top_p"],
+                top_k=self.generation_config["top_k"],
+                max_tokens=self.generation_config["max_new_tokens"],
+                repetition_penalty=self.generation_config["repetition_penalty"]
+            )
+            
+            print(f"\n\nself.sampling_params: {self.sampling_params}\n\n")
+            
         except Exception as e:
-            logging.error("Ошибка в initialize_model: %s", str(e))
+            logging.error("Ошибка в initialize_engine: %s", str(e))
             raise
 
-    def initialize_streamer_transformers(self):
-        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True)
-
-    async def predict_transformers(self, user_input):
-        # Реализация для Transformers (оставлена без изменений для краткости)
-        messages = [{"role": "system", "content": self.system_prompt}] + list(self.short_memory) + [{"role": "user", "content": user_input}]
-        self.short_memory.append({"role": "user", "content": user_input})
-        
-        dynamic_params = self.adjust_parameters_based_on_context(user_input)
-        
-        inputs = self.tokenizer.apply_chat_template(
-            messages, 
-            tokenize=True, 
-            add_generation_prompt=True, 
-            return_tensors="pt", 
-            padding=True, 
-            truncation=True)
-        
-        attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)
-        inputs = inputs.to(self.device)
-        
-        generation_kwargs = {
-            "input_ids": inputs,
-            "attention_mask": attention_mask,
-            "streamer": self.streamer,
-            **self.generation_config,
-            **dynamic_params
-        }
-        
-        Thread(target=self.model.generate, kwargs=generation_kwargs).start()
-        response = ""
-        async for new_token in self.stream_response():
-            print(new_token[len(response):], end="", flush=True)
-            response = new_token
-            
-        # Используем регулярное выражение с захватывающей группой
-        cleaned_response = re.search(r"{reasoning}(.*?){answer}", response, flags=re.DOTALL)
-
-        if cleaned_response and not self.found_extracted_content:
-            # Извлекаем содержимое между {reasoning} и {answer}
-            extracted_content = cleaned_response.group(1)
-            print(extracted_content.strip())  # Убираем лишние пробелы или переносы строк
-            self.short_memory.append({"role": "assistant", "content": extracted_content})
-            self.found_extracted_content = True
-        else:
-            print("No match found")
-        
-        self.short_memory.append({"role": "assistant", "content": cleaned_response})
-        self.long_memory.add_to_long_memory(user_input, cleaned_response)
-        
-        return cleaned_response
-
-    async def stream_response_transformers(self):
-        partial_message = ""
+    async def predict_this_engine(self, user_input):
         try:
-            for new_token in self.streamer:
-                partial_message += new_token
-                yield partial_message
-                await asyncio.sleep(0.005)
+            messages = [{"role": "system", "content": self.system_prompt}] + list(self.short_memory) + [{"role": "user", "content": user_input}]
+            self.short_memory.append({"role": "user", "content": user_input})
+            
+            # Поиск в долговременной памяти
+            relevant_memories = await self.long_memory.retrieve_relevant_memory(user_input)
+            if relevant_memories:
+                print("Найдены релевантные записи:")
+                for memory in relevant_memories:
+                    print(f"Prompt: {memory['prompt']}\nResponse: {memory['response']}")
+                messages.extend([{"role": "assistant", "content": f"Do you remember? {memory['response']}"} for memory in relevant_memories])
+
+            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         except Exception as e:
-            logging.error("Ошибка в stream_response: %s", str(e))
-            yield partial_message
+            logging.error("Exception in predict_1: %s", str(e))
+            return "Exception in predict_1"
+        
+        try:
+            # Генерация уникального ID запроса
+            request_id = uid()
+            
+            # Генерация ответа
+            response = ""
+            for output in self.engine.generate(prompt, self.sampling_params, request_id):
+                text = output.outputs[0].text
+                response += text
+                print(text, end="", flush=True)
+
+        except Exception as e:
+            logging.error("Exception in predict_2: %s", str(e))
+            return "Exception in predict_2"
+
+        try:
+            # Очистка и валидация ответа
+            cleaned_response = self._clean_response(response)
+            
+            if self._is_response_valid(cleaned_response):
+                self.short_memory.append({"role": "assistant", "content": cleaned_response})
+                await self.long_memory.add_to_long_memory(user_input, cleaned_response)
+            else:
+                cleaned_response = self._enhance_response()
+        except Exception as e:
+            logging.error("Exception in predict_3: %s", str(e))
+            return "Exception in predict_3"
+            
+        return cleaned_response
 
     def adjust_parameters_based_on_context(self, user_input: str) -> dict:
         """Динамическая настройка параметров генерации на основе контекста"""
@@ -231,9 +230,12 @@ class ChatBot(HelperForChatBot):
             self.tokenizer.pad_token = self.tokenizer.eos_token
         logging.info("🔹 Инициализирован токенизатор: %s", self.tokenizer)
 
-    def initialize_engine(self): 
-        try:
-            BitsAndBytesConfig(
+    def initialize_streamer(self):
+        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True)
+        
+    def initialize_model(self): 
+        try:               
+            quantization_config = BitsAndBytesConfig(
                 bnb_4bit_compute_dtype="float32",
                 bnb_4bit_quant_storage="uint8",
                 bnb_4bit_quant_type="fp4",
@@ -246,33 +248,16 @@ class ChatBot(HelperForChatBot):
                 llm_int8_threshold=6.0
                 )
             
-            # Инициализация AsyncLLMEngine
-            self.engine = LLM(
-                model=self.engine_name,
-                tokenizer=self.tokenizer,
-                max_model_len=4096,
-                enforce_eager=True,
-                enable_chunked_prefill=True,  # Включите это
-                quantization="bitsandbytes",
-                load_format="bitsandbytes"
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                quantization_config=quantization_config,
+                device_map="auto",
+                config=self.model_config or AutoConfig.from_pretrained(self.model_name)
             )
-            
-            self.sampling_params = SamplingParams(
-                temperature=self.generation_config["temperature"],
-                top_p=self.generation_config["top_p"],
-                top_k=self.generation_config["top_k"],
-                max_tokens=self.generation_config["max_new_tokens"],
-                repetition_penalty=self.generation_config["repetition_penalty"]
-            )
-            
-            print(f"\n\nself.sampling_params: {self.sampling_params}\n\n")
-            
         except Exception as e:
-            logging.error("Ошибка в initialize_engine: %s", str(e))
+            logging.error("Ошибка в initialize_model: %s", str(e))
             raise
-
-    def initialize_streamer(self):
-        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True)
 
     async def predict(self, user_input):
         try:
@@ -285,28 +270,39 @@ class ChatBot(HelperForChatBot):
                 print("Найдены релевантные записи:")
                 for memory in relevant_memories:
                     print(f"Prompt: {memory['prompt']}\nResponse: {memory['response']}")
-                messages.extend([{"role": "assistant", "content": f"Do you remember? {memory['response']}"} for memory in relevant_memories])
+                messages.extend([{"role": "system", "content": f"Do you remember? {memory['response']}"} for memory in relevant_memories])
 
-            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         except Exception as e:
             logging.error("Exception in predict_1: %s", str(e))
             return "Exception in predict_1"
+
+        dynamic_params = self.adjust_parameters_based_on_context(user_input)
         
-        try:
-            # Генерация уникального ID запроса
-            request_id = uid()
+        inputs = self.tokenizer.apply_chat_template(
+            messages, 
+            tokenize=True, 
+            add_generation_prompt=True, 
+            return_tensors="pt", 
+            padding=True, 
+            truncation=True)
+        
+        attention_mask = inputs.ne(self.tokenizer.pad_token_id).int().to(self.device)
+        inputs = inputs.to(self.device)
+        
+        generation_kwargs = {
+            "input_ids": inputs,
+            "attention_mask": attention_mask,
+            "streamer": self.streamer,
+            **self.generation_config,
+            **dynamic_params
+        }
+        
+        Thread(target=self.model.generate, kwargs=generation_kwargs).start()
+        response = ""
+        async for new_token in self.stream_response():
+            print(new_token[len(response):], end="", flush=True)
+            response = new_token
             
-            # Генерация ответа
-            response = ""
-            for output in self.engine.generate(prompt, self.sampling_params, request_id):
-                text = output.outputs[0].text
-                response += text
-                print(text, end="", flush=True)
-
-        except Exception as e:
-            logging.error("Exception in predict_2: %s", str(e))
-            return "Exception in predict_2"
-
         try:
             # Очистка и валидация ответа
             cleaned_response = self._clean_response(response)
@@ -319,8 +315,22 @@ class ChatBot(HelperForChatBot):
         except Exception as e:
             logging.error("Exception in predict_3: %s", str(e))
             return "Exception in predict_3"
-            
+        
+        self.short_memory.append({"role": "assistant", "content": cleaned_response})
+        self.long_memory.add_to_long_memory(user_input, cleaned_response)
+        
         return cleaned_response
+
+    async def stream_response_transformers(self):
+        partial_message = ""
+        try:
+            for new_token in self.streamer:
+                partial_message += new_token
+                yield partial_message
+                await asyncio.sleep(0.005)
+        except Exception as e:
+            logging.error("Ошибка в stream_response: %s", str(e))
+            yield partial_message
         
     def _clean_response(self, response: str) -> str:
         """Очистка ответа от нежелательных тегов."""

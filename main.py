@@ -230,8 +230,6 @@ GENERATION_CONFIG_FOR_TRANSFORMERS = {
     "transformers_version": '4.45.0.dev0'
 }
 
-GENERATION_CONFIG_FOR_LLM = {}
-
 SYSTEM_PROMPT_FOR_LLAMA = '''
     "You are Layra, User's girlfriend. User is Dima. You know and love him for many years.",
     "Always follow these rules:"
@@ -313,7 +311,7 @@ if __name__ == "__main__":
         model_name=MODEL_NAME,
         max_history_length=MAX_HISTORY_LENGTH,
         model_config=None,
-        generation_config=GENERATION_CONFIG_FOR_LLM,
+        generation_config=GENERATION_CONFIG_FOR_TRANSFORMERS,
         system_prompt=SYSTEM_PROMPT_FOR_LLAMA,
         voice_config=VOICE_CONFIG,
         embeddings_model=EMBEDDINGS_MODEL,

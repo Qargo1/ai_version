@@ -1,7 +1,16 @@
 # Big thanks to:
 www.youtube.com/@Ai_Austin - for memory setup
 
-## Switching to Linux WSL2 - instructions
+## For using vllm - the fastest and interesting library Switch to Linux WSL2 - instructions:
+wsl --install
+wsl --install -d Ubuntu
+wsl --shutdown
+wsl --export Ubuntu "A:\wsl-ubuntu.tar"
+wsl --unregister Ubuntu
+mkdir A:\wsl-ubuntu
+wsl --import Ubuntu "A:\wsl-ubuntu" "A:\wsl-ubuntu.tar" --version 2
+wsl --list --verbose
+
 locate your project's dirrectory
 # run 'code .'
 
@@ -12,12 +21,15 @@ sudo apt update
 sudo apt install build-essential libopenblas-dev libomp-dev
 sudo apt upgrade
 =======
+pip install vllm
+
+## If we are working in standart transformers (+ don't need to do anything, never show any errors)
+# Install python 3.12
+https://www.python.org/downloads/release/python-3129/
 ## Installing venv:
 python -m venv .venv
 .venv\Scripts\activate
 
-pip install python-dev-tools
-pip install vllm
 pip install -U psycopg2-binary
 pip install cachetools
 pip install -U sentence-transformers
@@ -28,6 +40,7 @@ pip install -U bitsandbytes
 pip install typing_extensions
 pip3 install torch torchvision torchaudio
 
+pip install python-dev-tools
 pip install -U TTS
 pip install -U PyAudio
 pip install -U openai-whisper
@@ -102,12 +115,6 @@ echo 'export PATH=/usr/local/cuda-12.6/bin:$PATH' >> ~/.bashrc
 echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 nvcc --version
-
-## Libraries for GPU:
-CUDA 12.6
-+
-# Some libraries:
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 ## For voice
 git clone https://github.com/coqui-ai/TTS
