@@ -1,5 +1,5 @@
 from tools.memory.long_term import LongTermMemory
-from tools.sound.sound import AudioManager
+#from tools.sound.sound import AudioManager
 #from tools.translater.translater import Translater
 
 # Basic imports
@@ -177,10 +177,9 @@ class HelperForChatBot:
 class ChatBot(HelperForChatBot):
     def __init__(
         self,
-        engine_name=None,
+        model_name=None,
         max_history_length=10,
-        engine_config=None,
-        engine_config_path=None,
+        model_config=None,
         generation_config=None,
         generation_params=None,
         system_prompt=None,
@@ -196,14 +195,13 @@ class ChatBot(HelperForChatBot):
         
         self.found_extracted_content = False
         
-        self.engine_name = engine_name
+        self.engine_name = model_name
         self.tokenizer = None
         self.engine = None
         self.streamer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         self.engine_config = engine_config
-        self.engine_config_path = engine_config_path
         self.generation_config = generation_config or {"temperature": 0.7, "top_k": 40, "top_p": 0.9}
         self.generation_params = generation_params
         self.embeddings_model = embeddings_model
@@ -232,12 +230,28 @@ class ChatBot(HelperForChatBot):
 
     def initialize_engine(self): 
         try:
+            BitsAndBytesConfig(
+                bnb_4bit_compute_dtype="float32",
+                bnb_4bit_quant_storage="uint8",
+                bnb_4bit_quant_type="fp4",
+                bnb_4bit_use_double_quant=False,
+                llm_int8_enable_fp32_cpu_offload=False,
+                llm_int8_has_fp16_weight=False,
+                llm_int8_skip_modules=None,
+                load_in_4bit=False,
+                load_in_8bit=True, # True
+                llm_int8_threshold=6.0
+                )
+            
             # Инициализация AsyncLLMEngine
             self.engine = LLM(
                 model=self.engine_name,
                 tokenizer=self.tokenizer,
-                max_model_len=20000,
-                enforce_eager=True
+                max_model_len=4096,
+                enforce_eager=True,
+                chunked_prefill_enabled=True,  # Включите это
+                quantization="bitsandbytes",
+                load_format="bitsandbytes"
             )
             
             self.sampling_params = SamplingParams(

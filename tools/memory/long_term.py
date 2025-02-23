@@ -19,10 +19,7 @@ import torch
 import logging
 import psycopg2
 import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
-import faiss
-from peft import LoraConfig, get_peft_model
+
 import asyncio
 
 from qdrant_client import QdrantClient

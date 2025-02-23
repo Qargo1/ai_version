@@ -2,7 +2,29 @@
 www.youtube.com/@Ai_Austin - for memory setup
 
 =======
-## Installinf conda:
+## Installinf conda then:
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+$env:Path = "C:\Users\Qargo\.local\bin;$env:Path"
+uv venv vllm --python 3.12 --seed
+vllm\Scripts\activate
+
+pip install vllm
+pip install -U psycopg2-binary
+pip install cachetools
+pip install -U sentence-transformers
+pip install peft
+pip install qdrant-client
+pip install -U bitsandbytes
+
+pip install typing_extensions
+pip3 install torch torchvision torchaudio
+
+pip install -U TTS
+pip install -U PyAudio
+pip install -U openai-whisper
+pip3 install -U speechbrain
+pip install -U langchain-community
+pip install -r requirements.txt
 
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
@@ -72,7 +94,7 @@ https://github.com/qdrant/qdrant/releases
 # prepare embeddings for long memory
 git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
 
-# install cuda if needed?
+## install cuda if needed, not needed for vllm?
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
 sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
 wget https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
@@ -83,49 +105,16 @@ echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH' >> ~/.
 source ~/.bashrc
 nvcc --version
 
-# for CPU only:
-pip3 install torch torchvision torchaudio
-
 ## Libraries for GPU:
 CUDA 12.6
 +
-# Save libraries:
-pip install typing_extensions
+# Some libraries:
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-pip install -U sentence-transformers
-pip install -U psycopg2-binary
-pip install -U TTS
-pip install coqui-tts
-pip install -U PyAudio
-pip install -U openai-whisper
-pip3 install -U speechbrain
-CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
 
-# Not sure if safe:
-pip install -U chromadb - chromadb 0.6.3 requires numpy>=1.22.5, but you have numpy 1.22.0 which is incompatible.
-
-# Not using at all
-pip install -U langchain-community
-pip install -r requirements.txt
-
-pip install psycopg2-binary
-
-git clone https://github.com/psycopg/psycopg2.git
-python setup.py build
-sudo python setup.py install
-
-pip install -r requirements.txt - should go last
-
-# For voice
+## For voice
 git clone https://github.com/coqui-ai/TTS
 make system-deps  # intended to be used on Ubuntu (Debian). Let us know if you have a different OS.
 make install
-
-# for plain transformers (best option for me? not thrue anymore, now it's LLama)
-pip install -U bitsandbytes
-
-# Loading a GPTQ quantized model requires: only if you are going to use this type
-pip install -v gptqmodel --no-build-isolation
 
 ## Installing PostgreSQL via terminal commands
 sudo apt-get update

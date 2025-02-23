@@ -17,6 +17,7 @@ from transformers import (
 )
 from safetensors.torch import load_file
 from peft import PeftConfig, PeftModel
+from peft import LoraConfig, get_peft_model
 
 
 class GPTQTrainer:
