@@ -19,7 +19,7 @@ GENERATION_CONFIG_FOR_TRANSFORMERS = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 256, 
+    "max_new_tokens": 1024, 
 
     # Минимальная длина генерируемой последовательности, default = 0
     "min_length": 0, 

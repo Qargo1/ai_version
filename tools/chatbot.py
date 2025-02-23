@@ -44,8 +44,6 @@ from transformers import (
     TextIteratorStreamer
 )
 
-from vllm import LLM, SamplingParams
-
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -59,6 +57,8 @@ class HelperForLLM:
         
     def initialize_engine(self): 
         try:
+            from vllm import LLM, SamplingParams
+            
             BitsAndBytesConfig(
                 bnb_4bit_compute_dtype="float32",
                 bnb_4bit_quant_storage="uint8",
@@ -176,7 +176,7 @@ class HelperForLLM:
             model.scores = self.llamacpp_cache['scores']
 
 
-class ChatBot(HelperForChatBot):
+class ChatBot(HelperForLLM):
     def __init__(
         self,
         model_name=None,
@@ -203,7 +203,7 @@ class ChatBot(HelperForChatBot):
         self.streamer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        self.engine_config = model_config
+        self.model_config = model_config
         self.generation_config = generation_config or {"temperature": 0.7, "top_k": 40, "top_p": 0.9}
         self.generation_params = generation_params
         self.embeddings_model = embeddings_model
@@ -248,7 +248,7 @@ class ChatBot(HelperForChatBot):
         
     def initialize_tokenizer(self):
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.engine_name,
+            self.model_name,
             use_fast=True,
             padding_side="left"
         )
@@ -311,7 +311,7 @@ class ChatBot(HelperForChatBot):
                 self.short_memory.append({"role": "assistant", "content": cleaned_response})
                 await self.long_memory.add_to_long_memory(user_input, cleaned_response)
             else:
-                cleaned_response = self._enhance_response()
+                cleaned_response = self._enhance_response(cleaned_response)
         except Exception as e:
             logging.error("Exception in predict_3: %s", str(e))
             return "Exception in predict_3"

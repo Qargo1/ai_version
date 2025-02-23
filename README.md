@@ -34,6 +34,11 @@ pip install -U psycopg2-binary
 pip install numpy
 pip install cachetools
 pip install -U sentence-transformers
+pip install qdrant-client
+pip install accelerate
+# run docker for qdrant-client(if docker is not installed, instructions are down)
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+pip install -U bitsandbytes
 
 # Install needed cuda (12.6)
 https://developer.nvidia.com/cuda-12-6-3-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local
@@ -41,8 +46,6 @@ https://developer.nvidia.com/cuda-12-6-3-download-archive?target_os=Windows&targ
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 pip install peft
-pip install qdrant-client
-pip install -U bitsandbytes
 
 pip install typing_extensions
 pip3 install torch torchvision torchaudio
@@ -80,8 +83,6 @@ docker run --rm -it --gpus all --device /dev/snd -v /mnt/wslg/PulseServer:/mnt/w
 # Подключение больших файлов моделей
 docker run --rm -it -v /home/qargo/projects/ai_version_1.0.0/models:/app/models ai-bot
 
-# run docker for qdrant-client
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 ## If you need different python via linux - Installing python 3.10:
 1. **Добавь репозиторий**:
