@@ -44,6 +44,9 @@ from transformers import (
     TextIteratorStreamer
 )
 
+from vllm import LLM, SamplingParams
+
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -201,7 +204,7 @@ class ChatBot(HelperForChatBot):
         self.streamer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        self.engine_config = engine_config
+        self.engine_config = model_config
         self.generation_config = generation_config or {"temperature": 0.7, "top_k": 40, "top_p": 0.9}
         self.generation_params = generation_params
         self.embeddings_model = embeddings_model
@@ -249,7 +252,7 @@ class ChatBot(HelperForChatBot):
                 tokenizer=self.tokenizer,
                 max_model_len=4096,
                 enforce_eager=True,
-                chunked_prefill_enabled=True,  # Включите это
+                enable_chunked_prefill=True,  # Включите это
                 quantization="bitsandbytes",
                 load_format="bitsandbytes"
             )

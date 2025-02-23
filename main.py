@@ -5,12 +5,12 @@ import torch
 
 
 # Параметры модели
-MODEL_NAME = "/home/qargo/projects/ai_version_1.0.0/models/llm/Deep-Reasoning-Llama-3.2-Instruct-uncensored-3B"
+MODEL_NAME = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/models/llm/Deep-Reasoning-Llama-3.2-Instruct-uncensored-3B"
 
 # Конфигурация модели
 MAX_HISTORY_LENGTH = 20  # Ограничиваем историю диалога
 
-GENERATION_CONFIG_FOR_Llama32 = {
+GENERATION_CONFIG_FOR_TRANSFORMERS = {
     # Максимальная длина последовательности, включая токены начала и конца
     # Both `max_new_tokens` (=512) and `max_length`(=20) seem to have been set. `max_new_tokens` 
     # will take precedence. Please refer to the documentation for more information. 
@@ -230,6 +230,8 @@ GENERATION_CONFIG_FOR_Llama32 = {
     "transformers_version": '4.45.0.dev0'
 }
 
+GENERATION_CONFIG_FOR_LLM = {}
+
 SYSTEM_PROMPT_FOR_LLAMA = '''
     "You are Layra, User's girlfriend. User is Dima. You know and love him for many years.",
     "Always follow these rules:"
@@ -270,7 +272,7 @@ SYSTEM_PROMPT_FOR_LLAMA = '''
     5. Maintain a professional, intelligent, and analytical tone in your {reasoning} steps and you charecters's card tone in your {answer} step.
 '''
 
-EMBEDDINGS_MODEL = "/home/qargo/projects/ai_version_1.0.0/models/embeddings/all-MiniLM-L6-v2"
+EMBEDDINGS_MODEL = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/models/embeddings/all-MiniLM-L6-v2"
 
 DB_PARAMS = {
     "dbname": "memory_agent",
@@ -311,7 +313,7 @@ if __name__ == "__main__":
         model_name=MODEL_NAME,
         max_history_length=MAX_HISTORY_LENGTH,
         model_config=None,
-        generation_config=GENERATION_CONFIG_FOR_Llama32,
+        generation_config=GENERATION_CONFIG_FOR_LLM,
         system_prompt=SYSTEM_PROMPT_FOR_LLAMA,
         voice_config=VOICE_CONFIG,
         embeddings_model=EMBEDDINGS_MODEL,

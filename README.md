@@ -1,13 +1,22 @@
 # Big thanks to:
 www.youtube.com/@Ai_Austin - for memory setup
 
-=======
-## Installinf conda then:
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-$env:Path = "C:\Users\Qargo\.local\bin;$env:Path"
-uv venv vllm --python 3.12 --seed
-vllm\Scripts\activate
+## Switching to Linux WSL2 - instructions
+locate your project's dirrectory
+# run 'code .'
 
+# apt-get install git
+
+# some standart updates
+sudo apt update
+sudo apt install build-essential libopenblas-dev libomp-dev
+sudo apt upgrade
+=======
+## Installing venv:
+python -m venv .venv
+.venv\Scripts\activate
+
+pip install python-dev-tools
 pip install vllm
 pip install -U psycopg2-binary
 pip install cachetools
@@ -25,20 +34,6 @@ pip install -U openai-whisper
 pip3 install -U speechbrain
 pip install -U langchain-community
 pip install -r requirements.txt
-
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-
-
-## Switching to Linux WSL2 - instructions
-locate your project's dirrectory
-# run 'code .'
-
-# apt-get install git
-
-# some standart updates
-sudo apt update
-sudo apt install build-essential libopenblas-dev libomp-dev
-sudo apt upgrade
 
 ## Docker FAQ
 # Install docker
@@ -64,6 +59,9 @@ docker run --rm -it --gpus all --device /dev/snd -v /mnt/wslg/PulseServer:/mnt/w
 
 # Подключение больших файлов моделей
 docker run --rm -it -v /home/qargo/projects/ai_version_1.0.0/models:/app/models ai-bot
+
+# run docker for qdrant-client
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 ## Installing python 3.10
 1. **Добавь репозиторий**:

@@ -7,4 +7,6 @@ tools/memory/__pycache__
 
 __pycache__
 .github
-vllm
+.vllm
+.venv
+
