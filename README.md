@@ -2,6 +2,11 @@
 www.youtube.com/@Ai_Austin - for memory setup
 
 =======
+## Installinf conda:
+
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+
+
 ## Switching to Linux WSL2 - instructions
 locate your project's dirrectory
 # run 'code .'
