@@ -31,8 +31,15 @@ python -m venv .venv
 .venv\Scripts\activate
 
 pip install -U psycopg2-binary
+pip install numpy
 pip install cachetools
 pip install -U sentence-transformers
+
+# Install needed cuda (12.6)
+https://developer.nvidia.com/cuda-12-6-3-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local
+# Install pytorch for cuda
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
 pip install peft
 pip install qdrant-client
 pip install -U bitsandbytes
@@ -76,7 +83,7 @@ docker run --rm -it -v /home/qargo/projects/ai_version_1.0.0/models:/app/models 
 # run docker for qdrant-client
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
-## Installing python 3.10
+## If you need different python via linux - Installing python 3.10:
 1. **Добавь репозиторий**:
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
@@ -105,17 +112,6 @@ https://github.com/qdrant/qdrant/releases
 # prepare embeddings for long memory
 git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
 
-## install cuda if needed, not needed for vllm?
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin
-sudo mv cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
-wget https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
-sudo dpkg -i cuda-repo-ubuntu2404-12-6-local_12.6.2-560.35.03-1_amd64.deb
-sudo apt-get update
-echo 'export PATH=/usr/local/cuda-12.6/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-source ~/.bashrc
-nvcc --version
-
 ## For voice
 git clone https://github.com/coqui-ai/TTS
 make system-deps  # intended to be used on Ubuntu (Debian). Let us know if you have a different OS.
@@ -142,137 +138,7 @@ sudo systemctl status postgresql
 
 # Open PosgreSql in terminal and create new tables
 psql -U qargo -d memory_agent -h localhost
-
-DO $$
-DECLARE
-    table_name text;
-BEGIN
-    -- Проходим по всем таблицам в схеме 'public'
-    FOR table_name IN
-        SELECT tablename
-        FROM pg_tables
-        WHERE schemaname = 'public'
-    LOOP
-        -- Удаляем каждую таблицу с каскадным удалением зависимостей
-        EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', table_name);
-    END LOOP;
-END $$;
-
-CREATE TABLE conversations (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    prompt TEXT NOT NULL,
-                    response TEXT NOT NULL,
-                    quality TEXT
-                );
-CREATE TABLE user_preferences (
-                    id SERIAL PRIMARY KEY,
-                    prompt TEXT NOT NULL,
-                    response TEXT NOT NULL
-                );
-CREATE TABLE training_data (
-                    id SERIAL PRIMARY KEY,
-                    prompt TEXT NOT NULL,
-                    bad_response TEXT NOT NULL,
-                    right_response TEXT
-                );
-CREATE TABLE bot_errors (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    error_type TEXT NOT NULL,
-                    message TEXT NOT NULL
-                );
-                
-ALTER TABLE conversations
-ADD CONSTRAINT unique_prompt_response UNIQUE (prompt, response);
-
-CREATE OR REPLACE FUNCTION limit_conversations_per_prompt()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Удаляем старые записи, если количество строк с таким prompt превышает 5
-    DELETE FROM conversations
-    WHERE prompt = NEW.prompt
-    AND id NOT IN (
-        SELECT id
-        FROM conversations
-        WHERE prompt = NEW.prompt
-        ORDER BY timestamp DESC
-        LIMIT 5
-    );
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trigger_limit_conversations
-AFTER INSERT ON conversations
-FOR EACH ROW
-EXECUTE FUNCTION limit_conversations_per_prompt();
-
-ALTER TABLE user_preferences
-ADD CONSTRAINT unique_content UNIQUE (prompt);
-
-INSERT INTO conversations (timestamp, prompt, response, quality) VALUES (CURRENT_TIMESTAMP, 'what is my name?', 'Your name is Dima. Known online as Qargo.', 'good');
-INSERT INTO conversations (timestamp, prompt, response, quality) VALUES (CURRENT_TIMESTAMP, 'What is 3355 / 15?',
-'223.666667', 'good');
-INSERT INTO conversations (timestamp, prompt, response, quality) VALUES (CURRENT_TIMESTAMP, 'What do i like?', 'You like Anime, cats, tech and your dreams', 'good');
-
-INSERT INTO user_preferences (prompt, response) VALUES ('What is my name', 'Your name is Dima');
-INSERT INTO user_preferences (prompt, response) VALUES ('What is your name?', 'My name is Alise, i am your girfriend, how could even forget something like this???!!!!');
-
-\q
-
-## For audio
-sudo apt update
-sudo apt install pipewire pipewire-pulse
-
-#
-sudo apt update
-sudo apt install pulseaudio
-
-# open this
-mkdir -p ~/.config/pulse
-nano ~/.config/pulse/client.conf
-
-# add this to file
-default-server = unix:/mnt/wslg/PulseServer
-
-# play test sound
-paplay /usr/share/sounds/alsa/Front_Center.wav
-
-# restart
-systemctl --user start pipewire
-systemctl --user start pipewire-pulse
-
-pip uninstall pyaudio
-sudo apt install portaudio19-dev
-pip install pyaudio
-
-export PULSE_SERVER=unix:/mnt/wslg/PulseServer
-python your_script.py
-
-#
-pip install -U openai-whisper
-
-# on Ubuntu or Debian
-sudo apt update && sudo apt install ffmpeg
-pip install setuptools-rust
-
-# Download model for audio recognishen this preferred language DEPRICATED
-https://alphacephei.com/vosk/models
-
-## Voice Installing
-pip install git+https://github.com/openai/whisper.git
-
-# For GUI install: 
-https://www.pgadmin.org/ 
-or
-https://www.beekeeperstudio.io/
-or
-Table Plus
-
-## Some unused libraries
-
-# pip install gradio - not sure i need it
+instructions in postgre_helper
 
 ## For 3d visual
 

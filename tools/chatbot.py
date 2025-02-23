@@ -197,7 +197,7 @@ class ChatBot(HelperForChatBot):
         
         self.found_extracted_content = False
         
-        self.engine_name = model_name
+        self.model_name = model_name
         self.tokenizer = None
         self.engine = None
         self.streamer = None
@@ -211,7 +211,7 @@ class ChatBot(HelperForChatBot):
         self.short_memory = deque(maxlen=max_history_length)
         self.past_seq = None  # Для prefix-matching
         
-        self.initialize_engine()
+        self.initialize_model()
         self.initialize_tokenizer()
         self.initialize_streamer()
         
@@ -220,19 +220,6 @@ class ChatBot(HelperForChatBot):
         
         self.start_background_cache_updater()
 
-    def initialize_tokenizer(self):
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.engine_name,
-            use_fast=True,
-            padding_side="left"
-        )
-        if not self.tokenizer.pad_token:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        logging.info("🔹 Инициализирован токенизатор: %s", self.tokenizer)
-
-    def initialize_streamer(self):
-        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True)
-        
     def initialize_model(self): 
         try:               
             quantization_config = BitsAndBytesConfig(
@@ -258,7 +245,20 @@ class ChatBot(HelperForChatBot):
         except Exception as e:
             logging.error("Ошибка в initialize_model: %s", str(e))
             raise
+        
+    def initialize_tokenizer(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.engine_name,
+            use_fast=True,
+            padding_side="left"
+        )
+        if not self.tokenizer.pad_token:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        logging.info("🔹 Инициализирован токенизатор: %s", self.tokenizer)
 
+    def initialize_streamer(self):
+        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True)
+        
     async def predict(self, user_input):
         try:
             messages = [{"role": "system", "content": self.system_prompt}] + list(self.short_memory) + [{"role": "user", "content": user_input}]
