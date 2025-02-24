@@ -1,12 +1,21 @@
 # Big thanks to:
 www.youtube.com/@Ai_Austin - for memory setup
 
+# Container for vllm:
+cd A:\YandexDisk\YandexDisk\ai_version_1.0.0\tools\docker
+docker build -t my-vllm-image .
+docker run -v A:\YandexDisk\YandexDisk\ai_version_1.0.0\tools\docker:/mounted_folder -p 8000:8000 my-vllm-image --model /models/my-model
+
 # Follow all the instructions for Triton:
 https://github.com/woct0rdho/triton-windows
 
 # Then this libraries:
 pip install -U bitsandbytes
 pip install unsloth
+
+# For voice:
+pip install outetts
+pip install ipython
 
 ## For using vllm - the fastest and interesting library Switch to Linux WSL2 - instructions:
 wsl --install
@@ -62,7 +71,6 @@ pip install typing_extensions
 pip3 install torch torchvision torchaudio
 
 pip install python-dev-tools
-pip install -U TTS
 pip install -U PyAudio
 pip install -U openai-whisper
 pip3 install -U speechbrain
@@ -123,11 +131,6 @@ https://github.com/qdrant/qdrant/releases
 
 # prepare embeddings for long memory
 git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
-
-## For voice
-git clone https://github.com/coqui-ai/TTS
-make system-deps  # intended to be used on Ubuntu (Debian). Let us know if you have a different OS.
-make install
 
 ## Installing PostgreSQL via terminal commands
 sudo apt-get update

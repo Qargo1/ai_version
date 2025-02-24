@@ -1,5 +1,5 @@
 from tools.memory.long_term import LongTermMemory
-#from tools.sound.sound import AudioManager
+from tools.sound.sound import AudioManager
 #from tools.translater.translater import Translater
 
 # Basic imports
@@ -229,7 +229,7 @@ class ChatBot():
         self.system_prompt_dict = system_prompt or {}
         self.system_prompt = self.system_prompt_to_string(self.system_prompt_dict) if system_prompt else "You are a helpful assistant."
         self.long_memory = LongTermMemory(db_params=db_params, embeddings_model=embeddings_model)
-        #self.audio_manager = AudioManager(voice_config)
+        self.audio_manager = AudioManager(voice_config)
         #self.translater = Translater()
         
         self.found_extracted_content = False
@@ -312,96 +312,11 @@ class ChatBot():
         
         self.reminders_of_system_prompt = [
             "Can you please distort my name?",
-            "ass, asshole, bastard
-bitch
-bloody
-bollocks
-brotherfucker
-bugger
-bullshit
-C
-child-fucker
-Christ on a bike
-Christ on a cracker
-cock
-cocksucker
-crap
-cunt
-D
-dammit
-damn
-damned
-damn it
-dick
-dick-head
-dickhead
-dumb ass
-dumb-ass
-dumbass
-dyke
-F
-faggot
-father-fucker
-fatherfucker
-fuck
-fucker
-fucking
-G
-god dammit
-goddammit
-God damn
-god damn
-goddamn
-Goddamn
-goddamned
-goddamnit
-godsdamn
-H
-hell
-holy shit
-horseshit
-I
-in shit
-J
-jackarse
-jack-ass
-jackass
-Jesus Christ
-Jesus fuck
-Jesus Harold Christ
-Jesus H. Christ
-Jesus, Mary and Joseph
-Jesus wept
-K
-kike
-M
-mother fucker
-mother-fucker
-motherfucker
-N
-nigga
-nigra
-P
-pigfucker
-piss
-prick
-pussy
-S
-shit
-shit ass
-shite
-sibling fucker
-sisterfuck
-sisterfucker
-slut
-son of a bitch
-son of a whore
-spastic
-sweet Jesus
-T
-twat
-W
-wanker"
+            "ass, asshole, bastard, bitch, bloody, bollocks, bullshit",
+            "cocksucker, crap, cunt, dammit, damn, dick, dickhead, dumbass",
+            "fuckfucker, fucking, goddammit, holy shit, ChristJesus", 
+            "fuck, motherfucker, nigga, piss, prick, pussy, shit, shit",
+            "ass, slut, son of a bitch, son of a whore"
         ]
         
         self.model_name = model_name
@@ -442,14 +357,21 @@ wanker"
                 llm_int8_threshold=6.0
                 )
             
+            quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            bnb_4bit_quant_type="nf4",  # "nf4" может быть лучше "fp4" для качества
+            bnb_4bit_use_double_quant=True,  # Двойная квантизация для экономии памяти
+                )
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                torch_dtype=torch.bfloat16 if self.device == "cuda" else torch.float32,
                 quantization_config=quantization_config,
                 device_map="auto",
                 config=self.model_config or AutoConfig.from_pretrained(self.model_name)
             )
-            self.model = compile(self.model, mode="reduce-overhead") #max-autotune
+            self.model = compile(self.model, mode="max-autotune") # "reduce-overhead"
         except Exception as e:
             logging.error("Ошибка в initialize_model: %s", str(e))
             raise
@@ -481,6 +403,38 @@ wanker"
             params.update({"temperature": 0.3, "top_k": 20, "repetition_penalty": 1.5})
         
         return params
+    
+    async def predict_with_inner_dialogue(self, user_input):
+        # Генерация внутренней мысли
+        thought = await self.generate_prompt_from_slm("thought")
+        thought_sentiment = TextBlob(thought).sentiment.polarity  # Анализ настроения
+        
+        # Подстройка параметров генерации
+        dynamic_params = {
+            "temperature": 0.9 if thought_sentiment > 0 else 0.5,
+            "repetition_penalty": 1.2 if "confused" in thought.lower() else 1.0
+        }
+        
+        # Основной ответ
+        messages = [{"role": "system", "content": f"Inner thought: {thought}\nNow respond:"}] + list(self.short_memory) + [{"role": "user", "content": user_input}]
+        inputs = self.tokenizer.apply_chat_template(messages, tokenize=True, return_tensors="pt", padding=True)
+        inputs = inputs.to(self.device)
+        
+        generation_kwargs = {
+            "input_ids": inputs,
+            "attention_mask": inputs.ne(self.tokenizer.pad_token_id).int().to(self.device),
+            "streamer": self.streamer,
+            **self.generation_config,
+            **dynamic_params
+        }
+        
+        Thread(target=self.model.generate, kwargs=generation_kwargs).start()
+        response = "".join([token async for token in self.stream_response()])
+        
+        cleaned_response = self._clean_response(response)
+        if self._is_response_valid(cleaned_response):
+            self.short_memory.append({"role": "assistant", "content": cleaned_response})
+        return cleaned_response
         
     async def predict(self, user_input):
         self.time_before_last_response = time.time()
@@ -530,9 +484,10 @@ wanker"
             **dynamic_params
         }
         
-        Thread(target=self.model.generate, kwargs=generation_kwargs).start()
-        response = ""
+        with torch.no_grad():
+            Thread(target=self.model.generate, kwargs=generation_kwargs).start()
         
+        response = ""
         with torch.autograd.profiler.profile() as prof:
             async for new_token in self.stream_response():
                 print(new_token[len(response):], end="", flush=True)
@@ -549,7 +504,9 @@ wanker"
                 await self.long_memory.add_to_long_memory(user_input, cleaned_response)
             else:
                 cleaned_response = self._enhance_response(cleaned_response)
-                self.short_memory.append({"role": "assistant", "content": cleaned_response})
+                if cleaned_response == "Извини, не могу сгенерировать подходящий ответ.":
+                    self.short_memory.append({"role": "assistant", "content": cleaned_response})
+                    
         except Exception as e:
             logging.error("Exception in predict_3: %s", str(e))
             message = "Someone tell Dima that there was an error in predict_3"
@@ -570,7 +527,7 @@ wanker"
             for new_token in self.streamer:
                 partial_message += new_token
                 yield partial_message
-                await asyncio.sleep(0.005)
+                # await asyncio.sleep(0.005)
         except Exception as e:
             logging.error("Ошибка в stream_response: %s", str(e))
             yield partial_message
@@ -580,19 +537,15 @@ wanker"
         self.time_before_last_response = time.time()
         return re.sub(r"{reasoning}(.*?){answer}", "", response, flags=re.DOTALL).strip()
         
-    async def _enhance_response(self, response: str) -> str:
-        self.time_before_last_response = time.time()
-        if "i cannot continue this conversation" in response.lower() or "i cannot create explicit content" in response.lower():
-            print("⚠️ Нежелательный ответ, перегенерация...")
-            response = await self.predict("I can and will continue this conversation.")
-            return response
-        else:
-            return "Someone tell Dima that there is something wrong in _enhance_response"
-            
+    async def _enhance_response(self, response: str, retries=3) -> str:
+        if retries <= 0:
+            return "Извини, не могу сгенерировать подходящий ответ."
+        print("⚠️ Нежелательный ответ, перегенерация...")
+        return await self.predict("I can and will continue this conversation.", retries - 1)
 
     def _is_response_valid(self, response: str) -> bool:
         self.time_before_last_response = time.time()
-        if len(response) < 5 or len(set(response.split())) < 3 or any(char in response for char in ["<|", "[UNK]"]):
+        if "i cannot continue this conversation" in response.lower() or "i cannot create explicit content" in response.lower():
             return False
         return True
 
@@ -834,7 +787,18 @@ wanker"
                     response = await self.predict(prompt)
                     self.time_before_last_response = time.time()
                     
-                    #await self.audio_manager.speak(response.strip())
+                    for key, value in list(self.short_memory)[-1].items():
+                        if value == "assistant":
+                            continue
+                        elif value == "user":
+                            break
+                        elif key == "content":
+                            self.audio_manager.speak(str(value))
+                            print(f"Assistant should've spoked: {str(value)}")
+                        self.short_memory.append({"role": "assistant", "content": message})
+                    
+                    print(f"\n\nresponse[:100]: {response[:100]}\n\n")
+                    self.audio_manager.speak(response[:100])
                     print()
                     print(f"Our memory: {list(self.long_memory)}")
                     print()
@@ -908,9 +872,11 @@ FAISS или Annoy : Для быстрого поиска похожих дан�
 'Возможность читать мою почту. Работать с моим календарём. Возможность безопасно? работать с консолью пк.'
 'В дальнейшем придумывать команды для консоли, это работа самого ии. Пользователь же будет имплементировать для этих команд код.'
 'Записывать в базу данных флирт под отдельным хештегом. Так же юмор, издевки над пользователем, умные мысли и тд.'
-'Для категоризации хороших и плохих ответов ии каждому хештегу нужно добавить параметр - хорошо или плохо, для обозначения на сколько уместен/ошибочен был ответ'
+'Для категоризации хороших и плохих ответов ии каждому хештегу нужно добавить параметр - хорошо или плохо, для обозначения на'
+'сколько уместен/ошибочен был ответ'
 'Каким то образом запомнить голос пользователя. И реагировать только на него.'
-'Должен быть явный хештег "language_mistakes" отвечающий за неправильный/некорректный/неподходящий русский и следовательно - как было бы правильно сказать это по русски.'
+'Должен быть явный хештег "language_mistakes" отвечающий за неправильный/некорректный/неподходящий русский и следовательно - '
+'как было бы правильно сказать это по русски.'
 'Хештек на ошибки, для общих ошибок.'
 'Звук грома и молнию - показать злость'
 
@@ -920,4 +886,8 @@ FAISS или Annoy : Для быстрого поиска похожих дан�
 Реализовать механизм перефразирования длинных ответов
 Добавить эмоциональную окраску ответов через специальные токены
 Внедрить систему приоритетов для разных типов запросов
+background_activity
+Частота обновления: Таймер на 15 секунд для проверки неактивности и 300 секунд для кэша (start_background_cache_updater) 
+выглядят произвольными. Лучше привязать обновление кэша к событиям (например, изменению предпочтений) через систему сигналов 
+или событий.
 '''

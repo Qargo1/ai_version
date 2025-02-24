@@ -12,3 +12,4 @@ __pycache__
 
 .triton
 unsloth_compiled_cache
+output.wav

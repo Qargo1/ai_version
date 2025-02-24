@@ -1,0 +1,99 @@
+# Указываем версию CUDA
+ARG CUDA_VERSION=12.4.1
+
+#################### BASE BUILD IMAGE ####################
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04 AS base
+ARG PYTHON_VERSION=3.12
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Устанавливаем Python и зависимости
+RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
+    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
+    && apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl sudo \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
+    && python3 -m pip install uv
+
+# Устанавливаем GCC 10
+RUN apt-get install -y gcc-10 g++-10 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 110 --slave /usr/bin/g++ g++ /usr/bin/g++-10
+
+WORKDIR /workspace
+
+# Устанавливаем зависимости
+COPY requirements-cuda.txt requirements-cuda.txt
+COPY requirements-common.txt requirements-common.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements-cuda.txt
+
+ARG torch_cuda_arch_list='7.0 7.5 8.0 8.6 8.9 9.0+PTX'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
+ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
+
+#################### WHEEL BUILD IMAGE ####################
+FROM base AS build
+
+COPY requirements-build.txt requirements-build.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements-build.txt
+
+# Копируем исходный код vLLM
+COPY vllm ./vllm
+
+# Собираем колесо
+WORKDIR /workspace/vllm
+RUN python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
+
+#################### vLLM INSTALLATION IMAGE ####################
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS vllm-base
+ARG PYTHON_VERSION=3.12
+WORKDIR /vllm-workspace
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Устанавливаем Python и зависимости
+RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
+    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
+    && apt-get update -y \
+    && apt-get install -y ccache software-properties-common git curl wget sudo vim python3-pip \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
+    && python3 -m pip install uv
+
+RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+
+# Устанавливаем колесо vLLM
+RUN --mount=type=bind,from=build,src=/workspace/vllm/dist,target=/vllm-workspace/dist \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system dist/*.whl --verbose
+
+# Устанавливаем FlashInfer
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system https://github.com/flashinfer-ai/flashinfer/releases/download/v0.2.1.post1/flashinfer_python-0.2.1.post1+cu124torch2.5-cp38-abi3-linux_x86_64.whl
+
+COPY requirements-build.txt requirements-build.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements-build.txt
+
+#################### OPENAI API SERVER ####################
+FROM vllm-base AS vllm-openai
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system accelerate hf_transfer
+
+# Копируем дополнительные файлы из вашей директории, если нужно
+# Например, если у вас есть конфигурационные файлы:
+# COPY tools/docker/my_config.yaml /vllm-workspace/config.yaml
+
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]

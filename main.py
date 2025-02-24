@@ -20,7 +20,7 @@ GENERATION_CONFIG_FOR_TRANSFORMERS = {
     "max_length": None, 
 
     # Количество новых токенов, которые будут сгенерированы (None — это означает, что не задано)
-    "max_new_tokens": 1024, 
+    "max_new_tokens": 512, 
 
     # Минимальная длина генерируемой последовательности, default = 0
     "min_length": 0, 
@@ -287,6 +287,14 @@ DB_PARAMS = {
 # Обновление конфигурации
 @dataclass
 class VoiceConfig:
+    speaker_json_path: str = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/models/voice/speaker.json"
+    cloning_audio_path: str = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/tools/sound/sounds/voice/vidcut.wav" # Путь к образцу голоса для клонирования
+    voice_model_path: str = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/models/voice/OuteTTS-0.3-1B"
+    voice_output_path:str = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/tools/sound/sounds/voice_output/output_voice.wav"
+    temperature: int = 0.1
+    repetition_penalty: int = 1.1
+    max_length: int = 128
+    voice_characteristics:str = None #"clarity" "upbeat enthusiasm" "friendliness" "clarity" "professionalism" "trustworthiness"
     speaker_wav: str = "/home/qargo/projects/ai_version_1.0.0/tools/sound/sounds/voice/Anny Would Like A Husband.wav"  # Путь к образцу твоего голоса
     speaker_id: str = "speaker_0"  # Идентификатор твоего голоса для pyannote
     sample_rate: int = 16000
