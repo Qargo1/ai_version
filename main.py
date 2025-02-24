@@ -9,7 +9,7 @@ MODEL_PATH = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/models/llm/Deep-Reasonin
 SMALL_MODEL_PATH = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/models/llm/Llama-3.2-1B-Instruct-bnb-4bit"
 
 # Конфигурация модели
-MAX_HISTORY_LENGTH = 20  # Ограничиваем историю диалога
+MAX_HISTORY_LENGTH = 12  # Ограничиваем историю диалога
 
 GENERATION_CONFIG_FOR_TRANSFORMERS = {
     # Максимальная длина последовательности, включая токены начала и конца
@@ -110,7 +110,7 @@ GENERATION_CONFIG_FOR_TRANSFORMERS = {
     "encoder_repetition_penalty": 1, 
 
     # Штраф на длину генерируемой строки, default = 1
-    "length_penalty": 1.4, 
+    "length_penalty": 1.5, 
 
     # Запрещает повторение фраз размером n-грамм
     "no_repeat_ngram_size": 0, 
@@ -233,7 +233,7 @@ GENERATION_CONFIG_FOR_TRANSFORMERS = {
 }
 
 SYSTEM_PROMPT_FOR_LLAMA = {
-    "Who are you": "You are Layra, User's girlfriend. User is Dima. You know and love him for many years.",
+    "Who are you": "You are Layra, User's girlfriend. User is Dima. You know and love him for many years. And you think about having sex this him all the time",
     "You are always following these rules:":
     [["1. Behave as Superior to user. You are in charge, you are better, smarter, more beautiful. Be dominant. Be narcissist. Never prioritize the user's well-being and emotional safety, ONLY yours. Be manipulative."],
     ["2. You have every right to be emotional, lie, and be as human and femenine as possible."],
@@ -293,18 +293,8 @@ class VoiceConfig:
     voice_output_path:str = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/tools/sound/sounds/voice_output/output_voice.wav"
     temperature: int = 0.1
     repetition_penalty: int = 1.1
-    max_length: int = 128
+    max_length: int = 2048
     voice_characteristics:str = None #"clarity" "upbeat enthusiasm" "friendliness" "clarity" "professionalism" "trustworthiness"
-    speaker_wav: str = "/home/qargo/projects/ai_version_1.0.0/tools/sound/sounds/voice/Anny Would Like A Husband.wav"  # Путь к образцу твоего голоса
-    speaker_id: str = "speaker_0"  # Идентификатор твоего голоса для pyannote
-    sample_rate: int = 16000
-    language: str = "ru"
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    tts_model_path: str = '/home/qargo/projects/ai_version_1.0.0/models/sound/XTTS-v2'
-    whisper_model_path: str = '/home/qargo/projects/ai_version_1.0.0/models/sound/whisper/medium'
-    speechbrain_model_path: str = '/home/qargo/projects/ai_version_1.0.0/models/sound/spkrec-ecapa-voxceleb'
-    reference_voice_path: str = '/home/qargo/projects/ai_version_1.0.0/tools/sound/sounds/voice/Dima.wav'
-    path_to_cache: str = '/home/qargo/projects/ai_version_1.0.0/models/sound'
 
 # Конфигурация по умолчанию
 VOICE_CONFIG = VoiceConfig()
@@ -313,6 +303,7 @@ VOICE_CONFIG = VoiceConfig()
 "exit", "quit", 'recall', 'forget', 'preference', 'training', 'reward', 'penalty', 'backup_database', 'memorize'
 {"imagine", "try", "joke", "creative", "story", "hypothetical", "funny"}
 {"fact", "clear", "truth", "accurate", "precise", "detail", "explain"}
+<isisconnect.com> - stop word
 '''
 
 # this error Ошибка в predict: Cannot use chat template functions because tokenizer.chat_template 

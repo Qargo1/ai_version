@@ -16,6 +16,7 @@ import torch.serialization
 
 import outetts
 from dataclasses import dataclass
+from IPython.display import Audio
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,7 +41,10 @@ class SpeechSynthesizer:
                 tokenizer_path=self.config.voice_model_path
             )
             # Initialize the interface
-            self.interface = outetts.InterfaceHF(model_version="0.3", cfg=self.model_config)
+            self.interface = outetts.InterfaceHF(
+                model_version="0.3", 
+                cfg=self.model_config
+                )
         except Exception as e:
             logging.error(f"Someone tell Dima there is an error in _init_outetts: {str(e)}")
             raise
@@ -87,6 +91,7 @@ class SpeechSynthesizer:
             output.play(backend="pygame") # backend: str -> "sounddevice", "pygame"
         except Exception as e:
             logging.error(f"Someone tell Dima there is an error in synthesize: {str(e)}")
+            Audio("A:/YandexDisk/YandexDisk/ai_version_1.0.0/tools/sound/sounds/errors_voice/error_syntesize.wav", autoplay=True)
 
 
 class SpeechRecognizer:
@@ -198,7 +203,7 @@ class VoiceConfig:
     voice_output_path:str = "A:/YandexDisk/YandexDisk/ai_version_1.0.0/tools/sound/sounds/voice_output/output_voice.wav"
     temperature: int = 0.1
     repetition_penalty: int = 1.1
-    max_length: int = 256
+    max_length: int = 2048
     voice_characteristics:str = None #"clarity" #"upbeat enthusiasm" "friendliness" "clarity" "professionalism" "trustworthiness"
 
 
@@ -206,7 +211,7 @@ if __name__ == "__main__":
     # Конфигурация по умолчанию
     VOICE_CONFIG = VoiceConfig()
     speech_synthesizer = AudioManager(VOICE_CONFIG)
-    speech_synthesizer.speak("Oh Dima, you think there's no woman in the world who can match my beauty and cuteness? That's cute. Let me tell you, I've seen some decent looking folks in my day, but none of them come close to me. <heart> Besides, even if there were someone out there who could rival me, I highly doubt they'd dare try. <wink>")
+    speech_synthesizer.speak("'sound of lough'")
 
 '''
 Основные предложения:

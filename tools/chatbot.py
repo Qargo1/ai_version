@@ -508,10 +508,8 @@ class ChatBot():
                     self.short_memory.append({"role": "assistant", "content": cleaned_response})
                     
         except Exception as e:
-            logging.error("Exception in predict_3: %s", str(e))
-            message = "Someone tell Dima that there was an error in predict_3"
-            self.short_memory.append({"role": "assistant", "content": message})
-            return "Exception in predict_3"
+            logging.error("Someone tell Dima that there was an error in predict_3: %s", str(e))
+            self.short_memory.append({"role": "assistant", "content": "Someone tell Dima that there was an error in predict_3"})
         
         print(f"\n\nОбщая память: {list(self.short_memory)}\n\n")
         
@@ -793,12 +791,9 @@ class ChatBot():
                         elif value == "user":
                             break
                         elif key == "content":
-                            self.audio_manager.speak(str(value))
-                            print(f"Assistant should've spoked: {str(value)}")
-                        self.short_memory.append({"role": "assistant", "content": message})
-                    
-                    print(f"\n\nresponse[:100]: {response[:100]}\n\n")
-                    self.audio_manager.speak(response[:100])
+                            # self.audio_manager.speak(str(value))
+                            self.audio_manager.speak(response[:800])
+                            print(f"Assistant should've spoked: {response[:800]}")
                     print()
                     print(f"Our memory: {list(self.long_memory)}")
                     print()
