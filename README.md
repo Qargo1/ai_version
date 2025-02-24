@@ -1,6 +1,13 @@
 # Big thanks to:
 www.youtube.com/@Ai_Austin - for memory setup
 
+# Follow all the instructions for Triton:
+https://github.com/woct0rdho/triton-windows
+
+# Then this libraries:
+pip install -U bitsandbytes
+pip install unsloth
+
 ## For using vllm - the fastest and interesting library Switch to Linux WSL2 - instructions:
 wsl --install
 wsl --install -d Ubuntu
@@ -31,10 +38,14 @@ python -m venv .venv
 .venv\Scripts\activate
 
 pip install -U psycopg2-binary
-pip install numpy
 pip install cachetools
 pip install -U sentence-transformers
-pip install qdrant-client
+
+# pip install qdrant-client - have problems with:
+unsloth 2025.2.15 requires protobuf<4.0.0, but you have protobuf 5.29.3 which is incompatible.
+unsloth-zoo 2025.2.7 requires protobuf<4.0.0, but you have protobuf 5.29.3 which is incompatible.
+
+pip install numpy
 pip install accelerate
 # run docker for qdrant-client(if docker is not installed, instructions are down)
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant

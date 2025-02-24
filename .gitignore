@@ -10,3 +10,5 @@ __pycache__
 .vllm
 .venv
 
+.triton
+unsloth_compiled_cache
